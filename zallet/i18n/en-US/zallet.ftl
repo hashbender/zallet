@@ -25,7 +25,7 @@
 -allow-multiple-wallet-imports = --allow-multiple-wallet-imports
 -datadir = --datadir
 -db_dump = db_dump
--zcashd_install_dir = --zcashd_install_dir
+-zcashd-install-dir = --zcashd-install-dir
 
 -legacy_pool_seed_fingerprint = legacy_pool_seed_fingerprint
 -zallet_toml = zallet.toml
@@ -137,8 +137,11 @@ err-init-zallet-already-running =
     Cannot obtain a lock on data directory {$datadir}. {-zallet} is probably already running.
 
 err-init-config-db-mismatch =
-    The wallet database was created for network type {$db_network_type}, but the
-    config is using network type {$config_network_type}.
+    The wallet database at {$db_path} was created for network type
+    {$db_network_type}, but the config is using network type
+    {$config_network_type}. A wallet database is permanently tied to one network;
+    set 'network' back to {$db_network_type}, or use a different data directory to
+    create a fresh {$config_network_type} wallet.
 err-init-db-incompatible-alpha =
     This wallet database was created by an incompatible alpha version of {-zallet}.
     To use this {-zallet} release, start again with a fresh Zallet wallet or a
@@ -147,7 +150,7 @@ err-init-db-invalid-zallet-version =
     The wallet database recorded an invalid {-zallet} version '{$version}':
     {$err}
 
-err-init-identity-not-found = Encryption identity file could not be located at {$path}
+err-init-identity-not-found = Encryption identity file could not be located at {$path}. An identity can be generated using generate-encryption-identity.
 err-init-identity-not-passphrase-encrypted = {$path} is not encrypted with a passphrase
 err-init-path-not-utf8 = {$path} is not currently supported (not UTF-8)
 err-init-identity-not-usable = Identity file at {$path} is not usable: {$error}
@@ -157,6 +160,8 @@ err-init-incompatible-consensus =
     not recognize, so {-zallet} cannot maintain a correct view of the chain.
     Unrecognized network upgrades: {$upgrades}.
     Upgrade {-zallet} to a release that supports these network upgrades.
+err-config-file-not-found = Configuration file at {$path} does not exist.
+err-config-file-invalid = Failed to parse configuration file at {$path}: {$error}
 
 ## Keystore errors
 
