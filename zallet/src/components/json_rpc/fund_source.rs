@@ -482,3 +482,155 @@ impl WalletRead for FundSourceFilter<'_> {
         self.inner.find_account_for_address(params, address)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use zcash_protocol::consensus;
+
+    use super::*;
+
+    fn mainnet() -> Network {
+        Network::Consensus(consensus::Network::MainNetwork)
+    }
+
+    // Transparent addresses reused from the `validate_address` / `verify_message` tests.
+    const MAINNET_P2PKH: &str = "t1VydNnkjBzfL1iAMyUbwGKJAF7PgvuCfMY";
+    const MAINNET_P2SH: &str = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd";
+
+    // A Sapling shielded address; valid, but not a transparent address.
+    const MAINNET_SAPLING: &str =
+        "zs1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75c8v35z";
+
+    /// Decodes a known-transparent address string into a [`TransparentAddress`].
+    fn taddr(s: &str) -> TransparentAddress {
+        match Address::decode(&mainnet(), s) {
+            Some(Address::Transparent(ta)) => ta,
+            _ => panic!("{s} is not a transparent address"),
+        }
+    }
+
+    /// Extracts the error message from a parse failure.
+    fn parse_err(value: JsonValue) -> String {
+        FundSource::parse(&value, &mainnet())
+            .expect_err("expected fund_source parsing to fail")
+            .message()
+            .to_string()
+    }
+
+    #[test]
+    fn parses_orchard() {
+        let source = FundSource::parse(&json!("orchard"), &mainnet()).unwrap();
+        assert!(matches!(source, FundSource::Orchard));
+        assert_eq!(source.allowed_pools(), &[ShieldedProtocol::Orchard]);
+        // A shielded-only source never permits spending transparent funds.
+        assert!(!source.allows_taddr(&taddr(MAINNET_P2PKH)));
+    }
+
+    #[test]
+    fn parses_sapling() {
+        let source = FundSource::parse(&json!("sapling"), &mainnet()).unwrap();
+        assert!(matches!(source, FundSource::Sapling));
+        assert_eq!(source.allowed_pools(), &[ShieldedProtocol::Sapling]);
+        assert!(!source.allows_taddr(&taddr(MAINNET_P2PKH)));
+    }
+
+    #[test]
+    fn parses_any_transparent() {
+        let source = FundSource::parse(&json!("any_transparent"), &mainnet()).unwrap();
+        assert!(matches!(source, FundSource::AnyTransparent));
+        // No shielded pool is spendable, but any transparent address is.
+        assert!(source.allowed_pools().is_empty());
+        assert!(source.allows_taddr(&taddr(MAINNET_P2PKH)));
+        assert!(source.allows_taddr(&taddr(MAINNET_P2SH)));
+    }
+
+    #[test]
+    fn parses_transparent_address_array() {
+        let source = FundSource::parse(&json!([MAINNET_P2PKH]), &mainnet()).unwrap();
+        match &source {
+            FundSource::Transparent(set) => {
+                assert_eq!(set.len(), 1);
+                assert!(set.contains(&taddr(MAINNET_P2PKH)));
+            }
+            other => panic!("expected Transparent, got {other:?}"),
+        }
+        assert!(source.allowed_pools().is_empty());
+        // Only the listed address is spendable.
+        assert!(source.allows_taddr(&taddr(MAINNET_P2PKH)));
+        assert!(!source.allows_taddr(&taddr(MAINNET_P2SH)));
+    }
+
+    #[test]
+    fn parses_multiple_transparent_addresses() {
+        let source = FundSource::parse(&json!([MAINNET_P2PKH, MAINNET_P2SH]), &mainnet()).unwrap();
+        match &source {
+            FundSource::Transparent(set) => {
+                assert_eq!(set.len(), 2);
+                assert!(set.contains(&taddr(MAINNET_P2PKH)));
+                assert!(set.contains(&taddr(MAINNET_P2SH)));
+            }
+            other => panic!("expected Transparent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deduplicates_repeated_transparent_addresses() {
+        let source = FundSource::parse(&json!([MAINNET_P2PKH, MAINNET_P2PKH]), &mainnet()).unwrap();
+        match source {
+            FundSource::Transparent(set) => assert_eq!(set.len(), 1),
+            other => panic!("expected Transparent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_string() {
+        assert_eq!(
+            parse_err(json!("transparent")),
+            "Invalid fund_source: expected \"orchard\", \"sapling\", \"any_transparent\", or an \
+             array of transparent addresses, got \"transparent\".",
+        );
+    }
+
+    #[test]
+    fn rejects_empty_array() {
+        assert_eq!(
+            parse_err(json!([])),
+            "Invalid fund_source: the array of transparent addresses is empty.",
+        );
+    }
+
+    #[test]
+    fn rejects_non_string_array_entry() {
+        assert_eq!(
+            parse_err(json!([42])),
+            "Invalid fund_source: array entries must be transparent address strings.",
+        );
+    }
+
+    #[test]
+    fn rejects_shielded_address_in_array() {
+        assert_eq!(
+            parse_err(json!([MAINNET_SAPLING])),
+            format!("Invalid fund_source: \"{MAINNET_SAPLING}\" is not a transparent address."),
+        );
+    }
+
+    #[test]
+    fn rejects_garbage_address_in_array() {
+        assert_eq!(
+            parse_err(json!(["not-an-address"])),
+            "Invalid fund_source: \"not-an-address\" is not a transparent address.",
+        );
+    }
+
+    #[test]
+    fn rejects_non_string_non_array() {
+        let expected = "Invalid fund_source: expected a string or an array of transparent \
+                        addresses.";
+        assert_eq!(parse_err(json!(42)), expected);
+        assert_eq!(parse_err(json!(true)), expected);
+        assert_eq!(parse_err(json!({"pool": "orchard"})), expected);
+        assert_eq!(parse_err(JsonValue::Null), expected);
+    }
+}
