@@ -4,7 +4,6 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use abscissa_core::Application;
 use documented::Documented;
 use jsonrpsee::core::JsonValue;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
@@ -18,8 +17,8 @@ use zcash_protocol::{PoolType, TxId, memo::MemoBytes};
 
 use crate::{
     components::{chain::Chain, database::DbConnection},
+    config::ZalletConfig,
     fl,
-    prelude::APP,
 };
 
 use super::server::LegacyCode;
@@ -809,11 +808,12 @@ pub(super) fn get_account_for_address(
 
 /// Broadcasts the specified transactions to the network, if configured to do so.
 pub(super) async fn broadcast_transactions<C: Chain>(
+    config: &ZalletConfig,
     wallet: &DbConnection,
     chain: C,
     txids: Vec<TxId>,
 ) -> RpcResult<SendResult> {
-    if APP.config().external.broadcast() {
+    if config.external.broadcast() {
         for txid in &txids {
             let tx = wallet
                 .get_transaction(*txid)

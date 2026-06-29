@@ -1,7 +1,6 @@
 use std::convert::Infallible;
 use std::num::NonZeroU32;
 
-use abscissa_core::Application;
 use documented::Documented;
 use jsonrpsee::core::{JsonValue, RpcResult};
 use schemars::JsonSchema;
@@ -19,6 +18,8 @@ use zcash_client_backend::{
 };
 use zcash_protocol::ShieldedProtocol;
 
+use std::sync::Arc;
+
 use crate::{
     components::{
         database::DbHandle,
@@ -33,7 +34,7 @@ use crate::{
         },
         keystore::KeyStore,
     },
-    prelude::*,
+    config::ZalletConfig,
 };
 
 /// Response to a `z_proposetransaction` RPC request.
@@ -65,6 +66,7 @@ pub(super) const PARAM_RECIPIENTS_REQUIRED: bool = true;
 pub(super) const PARAM_MINCONF_DESC: &str = "Only use funds confirmed at least this many times.";
 
 pub(crate) async fn call(
+    config: Arc<ZalletConfig>,
     mut wallet: DbHandle,
     keystore: KeyStore,
     account: JsonValue,
@@ -95,7 +97,7 @@ pub(crate) async fn call(
             |c| ConfirmationsPolicy::new_symmetrical(c, false),
         ),
         None => {
-            APP.config().builder.confirmations_policy().map_err(|_| {
+            config.builder.confirmations_policy().map_err(|_| {
                 LegacyCode::Wallet.with_message(
                     "Configuration error: minimum confirmations for spending trusted TXOs cannot exceed that for untrusted TXOs.")
             })?
@@ -113,7 +115,7 @@ pub(crate) async fn call(
             None,
             ShieldedProtocol::Orchard,
             DustOutputPolicy::default(),
-            APP.config().note_management.split_policy(),
+            config.note_management.split_policy(),
         );
         let input_selector = GreedyInputSelector::new();
         let mut source = FundSourceFilter::new(wallet.as_ref(), fund_source);

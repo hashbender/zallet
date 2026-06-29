@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::convert::Infallible;
 use std::num::NonZeroU32;
+use std::sync::Arc;
 
-use abscissa_core::Application;
 use jsonrpsee::core::{JsonValue, RpcResult};
 use secrecy::ExposeSecret;
 use serde_json::json;
@@ -44,8 +44,8 @@ use crate::{
         },
         keystore::KeyStore,
     },
+    config::ZalletConfig,
     fl,
-    prelude::*,
 };
 
 #[cfg(feature = "zcashd-import")]
@@ -123,6 +123,7 @@ pub(super) fn build_request(amounts: &[AmountParameter]) -> RpcResult<Transactio
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn call<C: Chain>(
+    config: Arc<ZalletConfig>,
     mut wallet: DbHandle,
     keystore: KeyStore,
     chain: C,
@@ -173,7 +174,7 @@ pub(crate) async fn call<C: Chain>(
             |c| ConfirmationsPolicy::new_symmetrical(c, false),
         ),
         None => {
-            APP.config().builder.confirmations_policy().map_err(|_| {
+            config.builder.confirmations_policy().map_err(|_| {
                 LegacyCode::Wallet.with_message(
                     "Configuration error: minimum confirmations for spending trusted TXOs cannot exceed that for untrusted TXOs.")
             })?
@@ -253,7 +254,7 @@ pub(crate) async fn call<C: Chain>(
         None,
         ShieldedProtocol::Orchard,
         DustOutputPolicy::default(),
-        APP.config().note_management.split_policy(),
+        config.note_management.split_policy(),
     );
 
     // TODO: Once `zcash_client_backend` supports spending transparent coins arbitrarily,
@@ -277,7 +278,7 @@ pub(crate) async fn call<C: Chain>(
 
     enforce_privacy_policy(&proposal, privacy_policy)?;
 
-    check_orchard_actions_limit(&proposal)?;
+    check_orchard_actions_limit(&config, &proposal)?;
 
     let derivation = account.source().key_derivation().ok_or_else(|| {
         LegacyCode::InvalidAddressOrKey
@@ -320,6 +321,7 @@ pub(crate) async fn call<C: Chain>(
             }),
         )),
         run(
+            config,
             wallet,
             chain,
             proposal,
@@ -336,9 +338,10 @@ pub(crate) async fn call<C: Chain>(
 /// Shared by `z_sendmany` and `z_sendfromaccount`, both of which build and execute a
 /// proposal through `create_proposed_transactions`.
 pub(super) fn check_orchard_actions_limit(
+    config: &ZalletConfig,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) -> RpcResult<()> {
-    let orchard_actions_limit = APP.config().builder.limits.orchard_actions().into();
+    let orchard_actions_limit = config.builder.limits.orchard_actions().into();
     for step in proposal.steps() {
         let orchard_spends = step
             .shielded_inputs()
@@ -397,6 +400,7 @@ pub(super) fn check_orchard_actions_limit(
 /// 3. #1277 Spendable notes are not locked, so an operation running in parallel
 ///    could also try to use them.
 pub(super) async fn run<C: Chain>(
+    config: Arc<ZalletConfig>,
     mut wallet: DbHandle,
     chain: C,
     proposal: Proposal<StandardFeeRule, ReceivedNoteId>,
@@ -421,7 +425,7 @@ pub(super) async fn run<C: Chain>(
     .map_err(|e| LegacyCode::Wallet.with_message(format!("Failed to propose transaction: {e}")))?
     .map_err(|e| LegacyCode::Wallet.with_message(format!("Failed to propose transaction: {e}")))?;
 
-    broadcast_transactions(&wallet, chain, txids.into()).await
+    broadcast_transactions(&config, &wallet, chain, txids.into()).await
 }
 
 #[cfg(test)]

@@ -1,10 +1,12 @@
 //! JSON-RPC server that is compatible with `zcashd`.
 
+use abscissa_core::Application;
 use jsonrpsee::{
     server::{RpcServiceBuilder, Server},
     tracing::{info, warn},
 };
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -12,6 +14,7 @@ use crate::{
     config::RpcSection,
     error::{Error, ErrorKind},
     fl,
+    prelude::APP,
 };
 
 use super::methods::{RpcImpl, RpcServer as _};
@@ -44,13 +47,20 @@ pub(crate) async fn spawn<C: Chain>(
     let listen_addr = config.bind[0];
 
     // Initialize the RPC methods.
+    let app_config = Arc::new((*APP.config()).clone());
     #[cfg(zallet_build = "wallet")]
-    let wallet_rpc_impl = WalletRpcImpl::new(wallet.clone(), keystore.clone(), chain.clone());
+    let wallet_rpc_impl = WalletRpcImpl::new(
+        wallet.clone(),
+        keystore.clone(),
+        chain.clone(),
+        app_config.clone(),
+    );
     let rpc_impl = RpcImpl::new(
         wallet,
         #[cfg(zallet_build = "wallet")]
         keystore,
         chain,
+        app_config,
     );
 
     let timeout = config.timeout();

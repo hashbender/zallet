@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use bip32::ChildNumber;
 use jsonrpsee::core::{JsonValue, RpcResult};
@@ -34,6 +34,7 @@ use crate::components::{
     },
     keystore::KeyStore,
 };
+use crate::config::ZalletConfig;
 
 /// The Orchard proving and verifying keys are deterministic and expensive to build (each
 /// takes on the order of seconds), so build them once and reuse them across requests.
@@ -56,6 +57,7 @@ pub(super) const PARAM_PRIVACY_POLICY_DESC: &str = "Policy for what information 
      implications.";
 
 pub(crate) async fn call<C: Chain>(
+    config: Arc<ZalletConfig>,
     wallet: DbHandle,
     keystore: KeyStore,
     chain: C,
@@ -144,7 +146,7 @@ pub(crate) async fn call<C: Chain>(
         LegacyCode::Wallet.with_message(format!("PCZT finalization task panicked: {e}"))
     })??;
 
-    broadcast_transactions(&wallet, chain, vec![txid]).await
+    broadcast_transactions(&config, &wallet, chain, vec![txid]).await
 }
 
 /// Decodes the hex-encoded PCZT argument into a [`Pczt`], mapping malformed input to a

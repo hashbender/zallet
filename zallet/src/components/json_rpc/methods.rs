@@ -4,11 +4,14 @@ use jsonrpsee::{
     proc_macros::rpc,
 };
 
+use std::sync::Arc;
+
 use crate::components::{
     chain::Chain,
     database::{Database, DbHandle},
     json_rpc::payments::AmountParameter,
 };
+use crate::config::ZalletConfig;
 
 #[cfg(zallet_build = "wallet")]
 use {
@@ -768,6 +771,7 @@ pub(crate) trait WalletRpc {
 
 pub(crate) struct RpcImpl<C: Chain> {
     wallet: Database,
+    config: Arc<ZalletConfig>,
     #[cfg(zallet_build = "wallet")]
     keystore: KeyStore,
     chain: C,
@@ -779,9 +783,11 @@ impl<C: Chain> RpcImpl<C> {
         wallet: Database,
         #[cfg(zallet_build = "wallet")] keystore: KeyStore,
         chain: C,
+        config: Arc<ZalletConfig>,
     ) -> Self {
         Self {
             wallet,
+            config,
             #[cfg(zallet_build = "wallet")]
             keystore,
             chain,
@@ -798,6 +804,10 @@ impl<C: Chain> RpcImpl<C> {
     async fn chain(&self) -> RpcResult<C> {
         Ok(self.chain.clone())
     }
+
+    fn config(&self) -> Arc<ZalletConfig> {
+        self.config.clone()
+    }
 }
 
 #[cfg(zallet_build = "wallet")]
@@ -810,9 +820,14 @@ pub(crate) struct WalletRpcImpl<C: Chain> {
 #[cfg(zallet_build = "wallet")]
 impl<C: Chain> WalletRpcImpl<C> {
     /// Creates a new instance of the wallet-specific RPC handler.
-    pub(crate) fn new(wallet: Database, keystore: KeyStore, chain_view: C) -> Self {
+    pub(crate) fn new(
+        wallet: Database,
+        keystore: KeyStore,
+        chain_view: C,
+        config: Arc<ZalletConfig>,
+    ) -> Self {
         Self {
-            general: RpcImpl::new(wallet, keystore.clone(), chain_view),
+            general: RpcImpl::new(wallet, keystore.clone(), chain_view, config),
             keystore,
             async_ops: RwLock::new(Vec::new()),
         }
@@ -824,6 +839,10 @@ impl<C: Chain> WalletRpcImpl<C> {
 
     async fn chain(&self) -> RpcResult<C> {
         self.general.chain().await
+    }
+
+    fn config(&self) -> Arc<ZalletConfig> {
+        self.general.config()
     }
 
     async fn start_async<F, T>(&self, (context, f): (Option<ContextInfo>, F)) -> OperationId
@@ -1105,6 +1124,7 @@ impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
         minconf: Option<u32>,
     ) -> z_propose_transaction::Response {
         z_propose_transaction::call(
+            self.config(),
             self.wallet().await?,
             self.keystore.clone(),
             account,
@@ -1122,6 +1142,7 @@ impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
         privacy_policy: String,
     ) -> z_finalize_transaction::Response {
         z_finalize_transaction::call(
+            self.config(),
             self.wallet().await?,
             self.keystore.clone(),
             self.chain().await?,
@@ -1141,6 +1162,7 @@ impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
         privacy_policy: String,
     ) -> z_send_from_account::Response {
         z_send_from_account::call(
+            self.config(),
             self.wallet().await?,
             self.keystore.clone(),
             self.chain().await?,
@@ -1164,6 +1186,7 @@ impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
         Ok(self
             .start_async(
                 z_send_many::call(
+                    self.config(),
                     self.wallet().await?,
                     self.keystore.clone(),
                     self.chain().await?,
@@ -1188,6 +1211,7 @@ impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
         privacy_policy: Option<String>,
     ) -> z_shieldcoinbase::Response {
         let (preflight, context, fut) = z_shieldcoinbase::call(
+            self.config(),
             self.wallet().await?,
             self.keystore.clone(),
             self.chain().await?,

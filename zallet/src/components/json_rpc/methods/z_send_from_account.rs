@@ -1,7 +1,6 @@
 use std::convert::Infallible;
 use std::num::NonZeroU32;
 
-use abscissa_core::Application;
 use jsonrpsee::core::{JsonValue, RpcResult};
 use secrecy::ExposeSecret;
 use zcash_client_backend::{
@@ -17,6 +16,8 @@ use zcash_client_backend::{
 use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_protocol::ShieldedProtocol;
 
+use std::sync::Arc;
+
 use crate::{
     components::{
         chain::Chain,
@@ -30,7 +31,7 @@ use crate::{
         },
         keystore::KeyStore,
     },
-    prelude::*,
+    config::ZalletConfig,
 };
 
 #[cfg(feature = "zcashd-import")]
@@ -54,6 +55,7 @@ pub(super) const PARAM_PRIVACY_POLICY_DESC: &str = "Policy for what information 
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn call<C: Chain>(
+    config: Arc<ZalletConfig>,
     wallet: DbHandle,
     keystore: KeyStore,
     chain: C,
@@ -90,7 +92,7 @@ pub(crate) async fn call<C: Chain>(
             |c| ConfirmationsPolicy::new_symmetrical(c, false),
         ),
         None => {
-            APP.config().builder.confirmations_policy().map_err(|_| {
+            config.builder.confirmations_policy().map_err(|_| {
                 LegacyCode::Wallet.with_message(
                     "Configuration error: minimum confirmations for spending trusted TXOs cannot exceed that for untrusted TXOs.")
             })?
@@ -108,7 +110,7 @@ pub(crate) async fn call<C: Chain>(
             None,
             ShieldedProtocol::Orchard,
             DustOutputPolicy::default(),
-            APP.config().note_management.split_policy(),
+            config.note_management.split_policy(),
         );
         let input_selector = GreedyInputSelector::new();
         let mut source = FundSourceFilter::new(wallet.as_ref(), fund_source);
@@ -130,7 +132,7 @@ pub(crate) async fn call<C: Chain>(
 
     enforce_privacy_policy(&proposal, privacy_policy)?;
 
-    check_orchard_actions_limit(&proposal)?;
+    check_orchard_actions_limit(&config, &proposal)?;
 
     let derivation = account.source().key_derivation().ok_or_else(|| {
         LegacyCode::InvalidAddressOrKey
@@ -162,6 +164,7 @@ pub(crate) async fn call<C: Chain>(
     // Unlike `z_sendmany`, this performs the entire operation in one shot rather than using
     // the background processing system.
     run(
+        config,
         wallet,
         chain,
         proposal,
