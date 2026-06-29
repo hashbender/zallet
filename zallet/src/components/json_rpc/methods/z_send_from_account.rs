@@ -175,3 +175,147 @@ pub(crate) async fn call<C: Chain>(
     )
     .await
 }
+
+/// End-to-end coverage of `z_sendfromaccount` driven exactly as the RPC dispatcher drives it:
+/// against a real funded wallet, with a real keystore deriving the spending key, producing and
+/// storing a fully-signed transaction (broadcasting disabled).
+#[cfg(test)]
+mod rpc_e2e_tests {
+    use std::io::Write as _;
+    use std::sync::Arc;
+
+    use age::secrecy::ExposeSecret;
+    use bip0039::{English, Mnemonic};
+    use incrementalmerkletree::frontier::Frontier;
+    use secrecy::SecretVec;
+    use serde_json::json;
+    use zcash_client_backend::data_api::{
+        Account as _,
+        chain::ChainState,
+        testing::{
+            AddressType, InitialChainState, TestBuilder, orchard::OrchardPoolTester,
+            pool::ShieldedPoolTester,
+        },
+    };
+    use zcash_client_sqlite::testing::{BlockCache, db::TestDbFactory};
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{
+        consensus::{NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD},
+        value::Zatoshis,
+    };
+
+    use crate::{
+        components::{
+            chain::{ChainBlock, testing::TestChain},
+            database::Database,
+            json_rpc::payments::AmountParameter,
+            keystore::KeyStore,
+        },
+        config::ZalletConfig,
+        network::Network,
+    };
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[allow(clippy::field_reassign_with_default)]
+    async fn send_from_account_builds_and_stores_a_transaction() {
+        // A mnemonic-derived seed, so zallet's mnemonic-based keystore can reproduce the
+        // account's spending key.
+        let mnemonic = Mnemonic::<English>::from_entropy(vec![7u8; 32]).unwrap();
+        let seed = SecretVec::new(mnemonic.to_seed("").to_vec());
+
+        // A funded Orchard wallet derived from that seed.
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_seed(seed)
+            .with_initial_chain_state(|_, network| {
+                let birthday_height = std::cmp::max(
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap(),
+                    network.activation_height(NetworkUpgrade::Canopy).unwrap()
+                        + ZIP212_GRACE_PERIOD,
+                );
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        birthday_height - 1,
+                        BlockHash([5; 32]),
+                        Frontier::empty(),
+                        Frontier::empty(),
+                    ),
+                    prior_sapling_roots: vec![],
+                    prior_orchard_roots: vec![],
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let fvk = OrchardPoolTester::test_account_fvk(&st);
+        st.generate_next_block(
+            &fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(1_000_000),
+        );
+        st.scan_cached_blocks(account.birthday().height(), 1);
+
+        let recipient = OrchardPoolTester::fvk_default_address(&fvk)
+            .to_zcash_address(st.network())
+            .encode();
+        let db_path = st.wallet().path().to_path_buf();
+        let account_uuid = account.id().expose_uuid().to_string();
+        let network = Network::RegTest(TestBuilder::<(), ()>::DEFAULT_NETWORK);
+
+        // zallet's own database, opened over the same funded SQLite file.
+        let db = Database::open_funded_for_test(&db_path, network)
+            .await
+            .unwrap();
+
+        // A keystore holding the account's mnemonic, unlocked by a native age identity.
+        let identity = age::x25519::Identity::generate();
+        let mut identity_file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(identity_file, "{}", identity.to_string().expose_secret()).unwrap();
+        let mut config = ZalletConfig::default();
+        // `encryption_identity()` resolves relative to the datadir; our path is absolute, but
+        // the datadir getter still must be set to avoid a panic.
+        config.datadir = Some(std::env::temp_dir());
+        config.keystore.encryption_identity = Some(identity_file.path().to_path_buf());
+        let keystore = KeyStore::new(&config, db.clone()).unwrap();
+        keystore
+            .initialize_recipients(vec![identity.to_public().to_string()])
+            .await
+            .unwrap();
+        keystore.encrypt_and_store_mnemonic(mnemonic).await.unwrap();
+
+        // Drive the RPC method exactly as the dispatcher does.
+        let chain = TestChain::new(ChainBlock {
+            height: account.birthday().height(),
+            hash: BlockHash([0; 32]),
+        });
+        let recipients: Vec<AmountParameter> = vec![
+            serde_json::from_value(json!({ "address": recipient, "amount": "0.002" })).unwrap(),
+        ];
+        let db_handle = db.handle().await.unwrap();
+
+        let result = super::call(
+            Arc::new(config),
+            db_handle,
+            keystore,
+            chain,
+            json!(account_uuid),
+            json!("orchard"),
+            recipients,
+            Some(1),
+            "AllowRevealedAmounts".to_string(),
+        )
+        .await;
+
+        let send_result =
+            result.expect("z_sendfromaccount should build, sign, and store a transaction");
+        let json = serde_json::to_value(&send_result).unwrap();
+        assert!(
+            json.get("txid")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.is_empty()),
+            "a resulting transaction id should be returned: {json:?}",
+        );
+    }
+}

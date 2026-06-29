@@ -250,6 +250,171 @@ pub(crate) enum SpendStatus {
     SpentSpenderUnknown,
 }
 
+/// A trivial in-memory [`Chain`] for tests that do not exercise the network: broadcasting is a
+/// no-op and every read returns an empty/none result. Suitable for RPC integration tests that
+/// run with broadcasting disabled.
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::ops::Range;
+
+    use futures::{
+        StreamExt as _,
+        stream::{self, BoxStream},
+    };
+    use zcash_client_backend::data_api::{
+        TransactionStatus,
+        chain::{ChainState, CommitmentTreeRoot},
+    };
+    use zcash_primitives::{
+        block::{Block, BlockHeader},
+        transaction::Transaction,
+    };
+    use zcash_protocol::{TxId, consensus::BlockHeight};
+
+    #[cfg(feature = "spend-index")]
+    use super::SpendStatus;
+    use super::{BlockLocator, Chain, ChainBlock, ChainError, ChainTx, ChainView};
+    #[cfg(not(feature = "spend-index"))]
+    use transparent::address::TransparentAddress;
+    #[cfg(feature = "spend-index")]
+    use transparent::bundle::OutPoint;
+
+    /// A no-op [`Chain`] and [`ChainView`] for tests.
+    #[derive(Clone)]
+    pub(crate) struct TestChain {
+        tip: ChainBlock,
+    }
+
+    impl TestChain {
+        /// Constructs a [`TestChain`] reporting `tip` as its chain tip.
+        pub(crate) fn new(tip: ChainBlock) -> Self {
+            Self { tip }
+        }
+    }
+
+    impl Chain for TestChain {
+        type View = TestChain;
+
+        async fn broadcast_transaction(&self, _tx: &Transaction) -> Result<(), ChainError> {
+            Ok(())
+        }
+
+        async fn get_sapling_subtree_roots(
+            &self,
+        ) -> Result<Vec<CommitmentTreeRoot<sapling::Node>>, ChainError> {
+            Ok(Vec::new())
+        }
+
+        async fn get_orchard_subtree_roots(
+            &self,
+        ) -> Result<Vec<CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>>, ChainError> {
+            Ok(Vec::new())
+        }
+
+        async fn snapshot(&self) -> Result<Self::View, ChainError> {
+            Ok(self.clone())
+        }
+    }
+
+    impl ChainView for TestChain {
+        async fn tip(&self) -> Result<ChainBlock, ChainError> {
+            Ok(self.tip)
+        }
+
+        async fn find_fork_point(
+            &self,
+            locator: &BlockLocator,
+        ) -> Result<Option<ChainBlock>, ChainError> {
+            Ok(locator
+                .hashes()
+                .contains(&self.tip.hash)
+                .then_some(self.tip))
+        }
+
+        async fn tree_state_as_of(
+            &self,
+            _height: BlockHeight,
+        ) -> Result<Option<ChainState>, ChainError> {
+            Ok(None)
+        }
+
+        async fn get_block_header(
+            &self,
+            _height: BlockHeight,
+        ) -> Result<Option<BlockHeader>, ChainError> {
+            Ok(None)
+        }
+
+        async fn get_block(&self, _height: BlockHeight) -> Result<Option<Block>, ChainError> {
+            Ok(None)
+        }
+
+        fn stream_blocks_to_tip(
+            &self,
+            _start: BlockHeight,
+        ) -> BoxStream<'_, Result<Block, ChainError>> {
+            stream::empty().boxed()
+        }
+
+        fn stream_blocks(
+            &self,
+            _range: &Range<BlockHeight>,
+        ) -> BoxStream<'_, Result<Block, ChainError>> {
+            stream::empty().boxed()
+        }
+
+        async fn get_mempool_stream(
+            &self,
+        ) -> Result<Option<BoxStream<'_, Transaction>>, ChainError> {
+            Ok(None)
+        }
+
+        async fn get_transaction(&self, _txid: TxId) -> Result<Option<ChainTx>, ChainError> {
+            Ok(None)
+        }
+
+        async fn get_transaction_status(
+            &self,
+            _txid: TxId,
+        ) -> Result<TransactionStatus, ChainError> {
+            Ok(TransactionStatus::TxidNotRecognized)
+        }
+
+        #[cfg(feature = "spend-index")]
+        async fn outpoint_spend_status(
+            &self,
+            _outpoint: &OutPoint,
+        ) -> Result<SpendStatus, ChainError> {
+            Ok(SpendStatus::Unspent)
+        }
+
+        #[cfg(not(feature = "spend-index"))]
+        async fn get_address_unspent_outpoints(
+            &self,
+            _address: &TransparentAddress,
+        ) -> Result<Vec<(TxId, u32)>, ChainError> {
+            Ok(Vec::new())
+        }
+
+        #[cfg(not(feature = "spend-index"))]
+        async fn get_address_tx_ids(
+            &self,
+            _address: &TransparentAddress,
+            _range: Range<BlockHeight>,
+        ) -> Result<Vec<TxId>, ChainError> {
+            Ok(Vec::new())
+        }
+
+        #[cfg(all(zallet_build = "wallet", feature = "zcashd-import"))]
+        async fn block_height(
+            &self,
+            _hash: &zcash_primitives::block::BlockHash,
+        ) -> Result<Option<BlockHeight>, ChainError> {
+            Ok(None)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::Range;

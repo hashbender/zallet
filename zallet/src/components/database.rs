@@ -172,6 +172,28 @@ impl Database {
             .await
             .map_err(|e| ErrorKind::Generic.context(e).into())
     }
+
+    /// Opens a database over an existing SQLite file (for example, one funded by the
+    /// `zcash_client_sqlite` test harness), running Zallet's external migrations so the
+    /// keystore tables exist, but skipping the alpha-compatibility and network-type checks
+    /// that assume Zallet created the file.
+    #[cfg(test)]
+    pub(crate) async fn open_funded_for_test(
+        path: &std::path::Path,
+        network: crate::network::Network,
+    ) -> Result<Self, Error> {
+        let db_data_pool = connection::pool(path, network)?;
+        let database = Self { db_data_pool };
+        let handle = database.handle().await?;
+        handle.with_mut(|mut db_data| {
+            WalletMigrator::new()
+                .with_external_migrations(all_external_migrations(db_data.params().network_type()))
+                .init_or_migrate(&mut db_data)
+                .map_err(|e| ErrorKind::Init.context(e))?;
+            Ok::<(), Error>(())
+        })?;
+        Ok(database)
+    }
 }
 
 fn verify_existing_database(

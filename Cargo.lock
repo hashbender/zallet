@@ -1822,7 +1822,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.3.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "blake2b_simd",
  "corez",
@@ -1858,7 +1858,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "blake2b_simd",
 ]
@@ -3936,7 +3936,7 @@ dependencies = [
 [[package]]
 name = "pczt"
 version = "0.7.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -7541,7 +7541,7 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.12.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "bech32 0.11.0",
  "bs58",
@@ -7554,7 +7554,7 @@ dependencies = [
 [[package]]
 name = "zcash_client_backend"
 version = "0.23.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -7615,7 +7615,7 @@ dependencies = [
 [[package]]
 name = "zcash_client_sqlite"
 version = "0.21.1"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "ambassador",
  "bip32",
@@ -7664,7 +7664,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.4.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "corez",
  "hex",
@@ -7674,7 +7674,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -7684,7 +7684,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.14.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "bech32 0.11.0",
  "bip0039",
@@ -7731,7 +7731,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.28.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "blake2b_simd",
  "block-buffer 0.11.0-rc.3",
@@ -7762,7 +7762,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.28.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7784,7 +7784,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.9.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "corez",
  "document-features",
@@ -7825,7 +7825,7 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.8.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "bip32",
  "bs58",
@@ -8293,7 +8293,7 @@ dependencies = [
 [[package]]
 name = "zip321"
 version = "0.8.0"
-source = "git+https://github.com/dannywillems/librustzcash.git?rev=530df6742cc3441cc47eade3814ee76d6c506fe8#530df6742cc3441cc47eade3814ee76d6c506fe8"
+source = "git+https://github.com/dannywillems/librustzcash.git?rev=541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0#541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0"
 dependencies = [
  "base64 0.22.1",
  "nom",
