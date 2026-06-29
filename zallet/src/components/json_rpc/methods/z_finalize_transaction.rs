@@ -352,3 +352,128 @@ mod tests {
         }
     }
 }
+
+/// End-to-end coverage of the finalize pipeline against a real funded wallet: a transaction
+/// is proposed, turned into a PCZT, authorized by [`authorize_pczt`] (proof generation keys,
+/// proofs, and signatures), and extracted into a valid transaction. This mirrors the
+/// librustzcash `pczt_single_step` reference flow with zallet's signing spliced in, and is the
+/// "whole process" test for `z_proposetransaction` + `z_finalizetransaction`.
+#[cfg(test)]
+mod round_trip_tests {
+    use std::convert::Infallible;
+
+    use incrementalmerkletree::frontier::Frontier;
+    use secrecy::ExposeSecret;
+    use zcash_client_backend::zip321::{Payment, TransactionRequest};
+    use zcash_client_backend::{
+        data_api::{
+            Account as _, WalletRead,
+            chain::ChainState,
+            testing::{
+                AddressType, InitialChainState, TestBuilder, pool::ShieldedPoolTester,
+                sapling::SaplingPoolTester, single_output_change_strategy,
+            },
+            wallet::{ConfirmationsPolicy, input_selection::GreedyInputSelector},
+        },
+        fees::StandardFeeRule,
+        wallet::OvkPolicy,
+    };
+    use zcash_client_sqlite::testing::{BlockCache, db::TestDbFactory};
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{
+        ShieldedProtocol,
+        consensus::{NetworkUpgrade, Parameters, ZIP212_GRACE_PERIOD},
+        value::Zatoshis,
+    };
+
+    use super::*;
+
+    /// Drives the full finalize round trip for a Sapling-funded account: authorize_pczt must
+    /// produce a PCZT that extracts into a transaction the wallet stores.
+    #[test]
+    fn sapling_round_trip_produces_a_stored_transaction() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_initial_chain_state(|_, network| {
+                // Start after ZIP 212 enforcement so the PCZT can be extracted.
+                let birthday_height = std::cmp::max(
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap(),
+                    network.activation_height(NetworkUpgrade::Canopy).unwrap()
+                        + ZIP212_GRACE_PERIOD,
+                );
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        birthday_height - 1,
+                        BlockHash([5; 32]),
+                        Frontier::empty(),
+                        Frontier::empty(),
+                    ),
+                    prior_sapling_roots: vec![],
+                    prior_orchard_roots: vec![],
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let fvk = SaplingPoolTester::test_account_fvk(&st);
+
+        // Fund the account with a single Sapling note.
+        let note_value = Zatoshis::const_from_u64(350_000);
+        st.generate_next_block(&fvk, AddressType::DefaultExternal, note_value);
+        st.scan_cached_blocks(account.birthday().height(), 1);
+        assert_eq!(st.get_total_balance(account.id()), note_value);
+
+        // Propose a transfer back to the account's own Sapling address.
+        let to = SaplingPoolTester::fvk_default_address(&fvk);
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            to.to_zcash_address(st.network()),
+            Zatoshis::const_from_u64(200_000),
+        )])
+        .unwrap();
+
+        let input_selector = GreedyInputSelector::new();
+        let change_strategy =
+            single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedProtocol::Sapling);
+        let proposal = st
+            .propose_transfer(
+                account.id(),
+                &input_selector,
+                &change_strategy,
+                request,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap();
+
+        let pczt = st
+            .create_pczt_from_proposal::<Infallible, _, Infallible>(
+                account.id(),
+                OvkPolicy::Sender,
+                &proposal,
+            )
+            .unwrap();
+
+        // The code under test: zallet's authorize_pczt.
+        let seed_fp = SeedFingerprint::from_seed(st.test_seed().unwrap().expose_secret())
+            .expect("test seed has a valid length");
+        let coin_type = ChildNumber::new(st.network().coin_type(), true).unwrap();
+        let authorized =
+            authorize_pczt(pczt, account.usk(), &seed_fp, coin_type).expect("authorize succeeds");
+
+        // Round-trip through hex so decode_pczt is exercised on a valid PCZT too.
+        let reparsed =
+            decode_pczt(&hex::encode(authorized.serialize())).expect("re-decode succeeds");
+
+        // An unsigned PCZT would fail here, so a successful extraction proves the signatures
+        // and proofs are valid.
+        let txid = st
+            .extract_and_store_transaction_from_pczt(reparsed)
+            .expect("extraction succeeds");
+
+        assert!(
+            st.wallet().get_transaction(txid).unwrap().is_some(),
+            "the finalized transaction should be stored in the wallet",
+        );
+    }
+}
