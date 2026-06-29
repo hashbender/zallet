@@ -892,7 +892,7 @@ async fn data_requests<C: Chain>(
                                 decrypt_and_store_transaction(
                                     params,
                                     db_data,
-                                    &tx.inner(),
+                                    tx.inner(),
                                     tx.mined_height(),
                                 )?;
                             }
