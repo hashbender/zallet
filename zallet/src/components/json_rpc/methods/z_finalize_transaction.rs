@@ -369,13 +369,17 @@ mod round_trip_tests {
     use zcash_client_backend::zip321::{Payment, TransactionRequest};
     use zcash_client_backend::{
         data_api::{
-            Account as _, WalletRead,
+            Account as _, WalletRead, WalletWrite,
             chain::ChainState,
             testing::{
-                AddressType, InitialChainState, TestBuilder, pool::ShieldedPoolTester,
-                sapling::SaplingPoolTester, single_output_change_strategy,
+                AddressType, InitialChainState, TestBuilder, orchard::OrchardPoolTester,
+                pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+                single_output_change_strategy,
             },
-            wallet::{ConfirmationsPolicy, input_selection::GreedyInputSelector},
+            wallet::{
+                ConfirmationsPolicy, create_pczt_from_proposal,
+                input_selection::GreedyInputSelector,
+            },
         },
         fees::StandardFeeRule,
         wallet::OvkPolicy,
@@ -390,10 +394,20 @@ mod round_trip_tests {
 
     use super::*;
 
-    /// Drives the full finalize round trip for a Sapling-funded account: authorize_pczt must
-    /// produce a PCZT that extracts into a transaction the wallet stores.
     #[test]
     fn sapling_round_trip_produces_a_stored_transaction() {
+        shielded_round_trip::<SaplingPoolTester>();
+    }
+
+    #[test]
+    fn orchard_round_trip_produces_a_stored_transaction() {
+        shielded_round_trip::<OrchardPoolTester>();
+    }
+
+    /// Drives the full finalize round trip for a `P`-pool-funded account: a self-transfer is
+    /// proposed, turned into a PCZT, authorized by [`authorize_pczt`], and extracted into a
+    /// transaction the wallet stores.
+    fn shielded_round_trip<P: ShieldedPoolTester>() {
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
@@ -419,7 +433,7 @@ mod round_trip_tests {
             .build();
 
         let account = st.test_account().cloned().unwrap();
-        let fvk = SaplingPoolTester::test_account_fvk(&st);
+        let fvk = P::test_account_fvk(&st);
 
         // Fund the account with a single Sapling note.
         let note_value = Zatoshis::const_from_u64(350_000);
@@ -428,7 +442,7 @@ mod round_trip_tests {
         assert_eq!(st.get_total_balance(account.id()), note_value);
 
         // Propose a transfer back to the account's own Sapling address.
-        let to = SaplingPoolTester::fvk_default_address(&fvk);
+        let to = P::fvk_default_address(&fvk);
         let request = TransactionRequest::new(vec![Payment::without_memo(
             to.to_zcash_address(st.network()),
             Zatoshis::const_from_u64(200_000),
@@ -437,7 +451,7 @@ mod round_trip_tests {
 
         let input_selector = GreedyInputSelector::new();
         let change_strategy =
-            single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedProtocol::Sapling);
+            single_output_change_strategy(StandardFeeRule::Zip317, None, P::SHIELDED_PROTOCOL);
         let proposal = st
             .propose_transfer(
                 account.id(),
@@ -477,5 +491,120 @@ mod round_trip_tests {
             st.wallet().get_transaction(txid).unwrap().is_some(),
             "the finalized transaction should be stored in the wallet",
         );
+    }
+
+    /// Shielding a transparent UTXO into Sapling exercises [`authorize_pczt`]'s transparent
+    /// input signing: it must derive the right key from the input's BIP 44 derivation and
+    /// produce a transaction that extracts successfully.
+    #[test]
+    fn transparent_shielding_round_trip_signs_transparent_inputs() {
+        use ::transparent::bundle::{OutPoint, TxOut};
+        use zcash_client_backend::{
+            data_api::TransparentOutputFilter, wallet::WalletTransparentOutput,
+        };
+        use zcash_keys::keys::UnifiedAddressRequest;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_initial_chain_state(|_, network| {
+                let birthday_height = std::cmp::max(
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap(),
+                    network.activation_height(NetworkUpgrade::Canopy).unwrap()
+                        + ZIP212_GRACE_PERIOD,
+                );
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        birthday_height - 1,
+                        BlockHash([5; 32]),
+                        Frontier::empty(),
+                        Frontier::empty(),
+                    ),
+                    prior_sapling_roots: vec![],
+                    prior_orchard_roots: vec![],
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let fvk = SaplingPoolTester::test_account_fvk(&st);
+
+        // The account's transparent receiver, which we fund and then spend.
+        let uaddr = st
+            .wallet()
+            .get_last_generated_address_matching(
+                account.id(),
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap()
+            .unwrap();
+        let taddr = *uaddr
+            .transparent()
+            .expect("the account's UA has a transparent receiver");
+
+        // Mine a block so the funded UTXO has a height, then inject a transparent UTXO at the
+        // account's transparent address.
+        let (h, _, _) = st.generate_next_block(
+            &fvk,
+            AddressType::Internal,
+            Zatoshis::const_from_u64(50_000),
+        );
+        st.scan_cached_blocks(h, 1);
+
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::fake(),
+            TxOut::new(Zatoshis::const_from_u64(100_000), taddr.script().into()),
+            Some(h),
+            Some(account.id()),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+
+        // Propose shielding the transparent funds into Sapling.
+        let input_selector = GreedyInputSelector::new();
+        let change_strategy =
+            single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedProtocol::Sapling);
+        let proposal = st
+            .propose_shielding(
+                &input_selector,
+                &change_strategy,
+                Zatoshis::const_from_u64(10_000),
+                &[taddr],
+                account.id(),
+                ConfirmationsPolicy::MIN,
+                TransparentOutputFilter::All,
+            )
+            .unwrap();
+
+        // The shielding proposal spends only transparent inputs (NoteRef = Infallible), so
+        // call the generic builder directly rather than the ReceivedNoteId-typed wrapper.
+        let network = *st.network();
+        let pczt = create_pczt_from_proposal::<_, _, Infallible, _, Infallible, _>(
+            st.wallet_mut(),
+            &network,
+            account.id(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .unwrap();
+
+        let seed_fp = SeedFingerprint::from_seed(st.test_seed().unwrap().expose_secret())
+            .expect("test seed has a valid length");
+        let coin_type = ChildNumber::new(network.coin_type(), true).unwrap();
+        let authorized = authorize_pczt(pczt, account.usk(), &seed_fp, coin_type)
+            .expect("authorize (incl. transparent signing) succeeds");
+
+        let reparsed =
+            decode_pczt(&hex::encode(authorized.serialize())).expect("re-decode succeeds");
+        let txid = st
+            .extract_and_store_transaction_from_pczt(reparsed)
+            .expect("extraction succeeds");
+
+        assert!(st.wallet().get_transaction(txid).unwrap().is_some());
     }
 }
