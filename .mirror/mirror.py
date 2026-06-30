@@ -123,10 +123,18 @@ def _gate_with_if(text, key):
 
 
 def _gate_add_if(text, key):
-    # Add an `if:` to a job that has none (skip on forks). The lookahead keeps
-    # it idempotent (won't insert a second `if:`).
-    pat = re.compile(r"(\n  " + re.escape(key) + r":\n    name: [^\n]*\n)(?!    if:)")
-    return pat.sub(r"\1    if: ${{ " + _RG + " }}\n", text, count=1)
+    # Add a top-level `if:` (skip on forks) as the job's first property. Works
+    # whether or not the job has a `name:`. Idempotent and a no-op when the job
+    # already has a top-level `if:` (which _gate_with_if will have gated).
+    m = re.search(r"\n  " + re.escape(key) + r":\n", text)
+    if not m:
+        return text
+    start = m.end()
+    nxt = re.search(r"\n  \S", text[start:])              # next top-level job key
+    block = text[start:start + nxt.start()] if nxt else text[start:]
+    if re.search(r"^    if:", block, re.M):                # already has a job-level if
+        return text
+    return text[:start] + "    if: ${{ " + _RG + " }}\n" + text[start:]
 
 
 def decouple(text):

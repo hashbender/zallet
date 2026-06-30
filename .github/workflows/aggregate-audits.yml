@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   trigger:
+    if: ${{ github.repository == 'zcash/zallet' }}
     name: Trigger
     runs-on: tenki-standard-medium-4c-8g
     steps:

@@ -8,7 +8,7 @@
       ["os: ubuntu-latest", "os: tenki-standard-medium-4c-8g"],
       ["os: [ubuntu-latest, windows-latest, macOS-latest]", "os: [tenki-standard-medium-4c-8g, windows-latest, macOS-latest]"]
     ],
-    "gate_jobs": ["trigger-integration"],
+    "gate_jobs": ["trigger-integration", "deploy", "trigger"],
     "accept_skipped": false
   }
 }
