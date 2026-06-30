@@ -1,0 +1,14 @@
+{
+  "upstream": "zcash/zallet", "fork": "hashbender/zallet", "since_pr": 531,
+  "runner_large": "tenki-standard-large-plus-16c-32g",
+  "runner_medium": "tenki-standard-medium-4c-8g",
+  "pr_ci_bases": ["main"],
+  "decouple": {
+    "subs": [
+      ["os: ubuntu-latest", "os: tenki-standard-medium-4c-8g"],
+      ["os: [ubuntu-latest, windows-latest, macOS-latest]", "os: [tenki-standard-medium-4c-8g, windows-latest, macOS-latest]"]
+    ],
+    "gate_jobs": ["trigger-integration"],
+    "accept_skipped": false
+  }
+}
