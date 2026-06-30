@@ -53,7 +53,7 @@ permissions:
 jobs:
   build-arm64:
     name: Build aarch64-musl via Nix
-    runs-on: ubuntu-24.04-arm # native arm64; free for public repos
+    runs-on: tenki-standard-medium-4c-8g # native arm64; free for public repos
     outputs:
       artifact_name: ${{ inputs.oci-artifact-name }}
       image_digest: ${{ steps.push.outputs.digest }}

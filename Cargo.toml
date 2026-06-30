@@ -91,6 +91,7 @@ tower = "0.4"
 
 # Testing
 once_cell = "1.2"
+proptest = "1.6"
 regex = "1.4"
 tempfile = "3"
 trycmd = "0.15"
@@ -106,6 +107,7 @@ zcash_protocol = "0.9"
 
 # Zcash payment protocols
 orchard = "0.14"
+pczt = { version = "0.7", features = ["prover", "signer"] }
 sapling = { package = "sapling-crypto", version = "0.7" }
 transparent = { package = "zcash_transparent", version = "0.8" }
 zcash_encoding = "0.4"
@@ -146,7 +148,7 @@ zcash_client_backend = "0.23"
 zcash_client_sqlite = "0.21"
 zcash_note_encryption = "0.4"
 zip32 = "0.2"
-bip32 = "0.2"
+bip32 = { version = "0.6.0-pre.1", default-features = false }
 
 # Zcashd wallet migration
 zewif = { version = "0.1" }
@@ -159,34 +161,35 @@ tonic = "0.14"
 
 [patch.crates-io]
 # TEMPORARY: pin librustzcash crates to
-# 4cdba554f5545050da784fc9e1eb073ae958d819 Commits beyond this point on
+# 4367ba26ed57624544e2350f055a5df89079474a Commits beyond this point on
 # `librustzcash` main introduce breaking API changes that neither `zebrad` nor
 # `zaino` can currently build with. If additional librustzcash changes are
 # needed, branch from this commit and pin to whatever subsequent commit
 # introduces changes to that branch; merges to `librustzcash` main are
 # exclusively proper history-preserving merge commits, so after such a branch
 # merges the commit reference will remain valid.
-equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-f4jumble = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-transparent = { package = "zcash_transparent", git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-zcash_client_sqlite = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "4cdba554f5545050da784fc9e1eb073ae958d819" }
+equihash = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+f4jumble = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+pczt = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+transparent = { package = "zcash_transparent", git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+zcash_address = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+zcash_client_backend = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+zcash_client_sqlite = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+zcash_encoding = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+zcash_history = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+zcash_keys = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+zcash_primitives = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+zcash_proofs = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
+zcash_protocol = { git = "https://github.com/dannywillems/librustzcash.git", rev = "541874cf1cbb46e43a04a4bfcfc388d13a1ac0c0" }
 
 age = { git = "https://github.com/str4d/rage.git", rev = "92f437bc2a061312fa6633bb70c91eef91142fd4" }
 
 zewif = { git = "https://github.com/zcash/zewif.git", rev = "798d7b3554ebada05bea63b67ee66f9c2558a21a" }
 zewif-zcashd = { git = "https://github.com/zcash/zewif-zcashd.git", rev = "22f8219bb2cb741b72683cbee170b6667c7da7b0" }
 
-zebra-chain = { git = "https://github.com/ZcashFoundation/zebra.git", rev = "9a27f886a5bfb143f65d1712e912cef252426800" }
-zebra-rpc = { git = "https://github.com/ZcashFoundation/zebra.git", rev = "9a27f886a5bfb143f65d1712e912cef252426800" }
-zebra-state = { git = "https://github.com/ZcashFoundation/zebra.git", rev = "9a27f886a5bfb143f65d1712e912cef252426800" }
+zebra-chain = { git = "https://github.com/nuttycom/zebra.git", rev = "9f2fcf29ecb7dab6ebde532eb66187a484b9a371" }
+zebra-rpc = { git = "https://github.com/nuttycom/zebra.git", rev = "9f2fcf29ecb7dab6ebde532eb66187a484b9a371" }
+zebra-state = { git = "https://github.com/nuttycom/zebra.git", rev = "9f2fcf29ecb7dab6ebde532eb66187a484b9a371" }
 
 zaino-common = { git = "https://github.com/zingolabs/zaino.git", rev = "ed5df1a60ad69731d4d2fab515972c5ccf172326" }
 zaino-fetch = { git = "https://github.com/zingolabs/zaino.git", rev = "ed5df1a60ad69731d4d2fab515972c5ccf172326" }

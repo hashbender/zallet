@@ -4,15 +4,18 @@ use jsonrpsee::{
     proc_macros::rpc,
 };
 
+use std::sync::Arc;
+
 use crate::components::{
     chain::Chain,
     database::{Database, DbHandle},
 };
+use crate::config::ZalletConfig;
 
 #[cfg(zallet_build = "wallet")]
 use {
     super::asyncop::{AsyncOperation, ContextInfo, OperationId},
-    crate::components::keystore::KeyStore,
+    crate::components::{json_rpc::payments::AmountParameter, keystore::KeyStore},
     serde::Serialize,
     tokio::sync::RwLock,
 };
@@ -61,9 +64,15 @@ mod validate_address;
 mod verify_message;
 mod view_transaction;
 #[cfg(zallet_build = "wallet")]
+mod z_finalize_transaction;
+#[cfg(zallet_build = "wallet")]
 mod z_get_total_balance;
 #[cfg(zallet_build = "wallet")]
 mod z_import_address;
+#[cfg(zallet_build = "wallet")]
+mod z_propose_transaction;
+#[cfg(zallet_build = "wallet")]
+mod z_send_from_account;
 #[cfg(zallet_build = "wallet")]
 mod z_send_many;
 #[cfg(zallet_build = "wallet")]
@@ -172,7 +181,7 @@ pub(crate) trait Rpc {
     /// - `offset`: An optional number of transactions to skip over before a page of results is
     ///   returned. Defaults to zero.
     /// - `limit`: An optional upper bound on the number of results that should be returned in a
-    ///   page.  
+    ///   page.
     ///
     /// WARNING: This is currently an experimental feature; arguments and result data may change at
     /// any time.
@@ -543,6 +552,82 @@ pub(crate) trait WalletRpc {
         start_height: Option<u64>,
     ) -> import_key::Response;
 
+    /// Proposes a transaction sending funds from an account, returning a PCZT for
+    /// inspection along with the privacy policy required to execute it.
+    ///
+    /// Unlike `z_sendmany`, the source of funds is an account UUID together with an
+    /// explicit fund source, rather than an address. This method does not sign or broadcast
+    /// the transaction, and does not generate proofs; pass the returned PCZT to
+    /// `z_finalizetransaction` to do so.
+    ///
+    /// # Arguments
+    /// - `account`: The UUID of the account to send the funds from.
+    /// - `fund_source`: Where funds may be drawn from. One of the strings `"orchard"`,
+    ///   `"sapling"`, `"any_transparent"`, or an array of transparent address strings.
+    /// - `recipients`: An array of JSON objects representing the amounts to send, with the
+    ///   same shape as `z_sendmany`'s `amounts`.
+    /// - `minconf` (numeric, optional): Only use funds confirmed at least this many times.
+    ///
+    /// The privacy policy required to execute the proposal is computed from the resulting
+    /// transaction and returned alongside the PCZT; the caller does not supply one.
+    #[method(name = "z_proposetransaction")]
+    async fn z_propose_transaction(
+        &self,
+        account: JsonValue,
+        fund_source: JsonValue,
+        recipients: Vec<AmountParameter>,
+        minconf: Option<u32>,
+    ) -> z_propose_transaction::Response;
+
+    /// Finalizes a proposed transaction, signing and broadcasting it.
+    ///
+    /// Takes a PCZT produced by `z_proposetransaction`, applies this account's spend
+    /// authorizing signatures and proofs, extracts the resulting transaction, and broadcasts
+    /// it, returning the resulting txid.
+    ///
+    /// # Arguments
+    /// - `account`: The UUID of the account whose keys should sign the transaction.
+    /// - `pczt`: The hex-encoded PCZT to finalize, as returned by `z_proposetransaction`.
+    /// - `privacy_policy` (string, required): Policy for what information leakage is
+    ///   acceptable, supplied as acknowledgement of the transaction's privacy implications.
+    ///   See `z_sendmany` for the list of accepted values.
+    #[method(name = "z_finalizetransaction")]
+    async fn z_finalize_transaction(
+        &self,
+        account: JsonValue,
+        pczt: String,
+        privacy_policy: String,
+    ) -> z_finalize_transaction::Response;
+
+    /// Sends funds from an account in a single operation, returning the resulting txids.
+    ///
+    /// This is the one-shot counterpart to `z_proposetransaction` + `z_finalizetransaction`:
+    /// it proposes, signs, proves, and broadcasts the transaction synchronously, and unlike
+    /// `z_sendmany` it does not use the background async-operation system.
+    ///
+    /// Like `z_proposetransaction`, the source of funds is an account UUID together with an
+    /// explicit fund source, rather than an address.
+    ///
+    /// # Arguments
+    /// - `account`: The UUID of the account to send the funds from.
+    /// - `fund_source`: Where funds may be drawn from. One of the strings `"orchard"`,
+    ///   `"sapling"`, `"any_transparent"`, or an array of transparent address strings.
+    /// - `recipients`: An array of JSON objects representing the amounts to send, with the
+    ///   same shape as `z_sendmany`'s `amounts`.
+    /// - `minconf` (numeric, optional): Only use funds confirmed at least this many times.
+    /// - `privacy_policy` (string, required): Policy for what information leakage is
+    ///   acceptable, supplied as acknowledgement of the transaction's privacy implications.
+    ///   See `z_sendmany` for the list of accepted values.
+    #[method(name = "z_sendfromaccount")]
+    async fn z_send_from_account(
+        &self,
+        account: JsonValue,
+        fund_source: JsonValue,
+        recipients: Vec<AmountParameter>,
+        minconf: Option<u32>,
+        privacy_policy: String,
+    ) -> z_send_from_account::Response;
+
     /// Send a transaction with multiple recipients.
     ///
     /// This is an async operation; it returns an operation ID string that you can pass to
@@ -606,7 +691,7 @@ pub(crate) trait WalletRpc {
     async fn z_send_many(
         &self,
         fromaddress: String,
-        amounts: Vec<z_send_many::AmountParameter>,
+        amounts: Vec<AmountParameter>,
         minconf: Option<u32>,
         fee: Option<JsonValue>,
         privacy_policy: Option<String>,
@@ -685,6 +770,7 @@ pub(crate) trait WalletRpc {
 
 pub(crate) struct RpcImpl<C: Chain> {
     wallet: Database,
+    config: Arc<ZalletConfig>,
     #[cfg(zallet_build = "wallet")]
     keystore: KeyStore,
     chain: C,
@@ -696,9 +782,11 @@ impl<C: Chain> RpcImpl<C> {
         wallet: Database,
         #[cfg(zallet_build = "wallet")] keystore: KeyStore,
         chain: C,
+        config: Arc<ZalletConfig>,
     ) -> Self {
         Self {
             wallet,
+            config,
             #[cfg(zallet_build = "wallet")]
             keystore,
             chain,
@@ -715,6 +803,10 @@ impl<C: Chain> RpcImpl<C> {
     async fn chain(&self) -> RpcResult<C> {
         Ok(self.chain.clone())
     }
+
+    fn config(&self) -> Arc<ZalletConfig> {
+        self.config.clone()
+    }
 }
 
 #[cfg(zallet_build = "wallet")]
@@ -727,9 +819,14 @@ pub(crate) struct WalletRpcImpl<C: Chain> {
 #[cfg(zallet_build = "wallet")]
 impl<C: Chain> WalletRpcImpl<C> {
     /// Creates a new instance of the wallet-specific RPC handler.
-    pub(crate) fn new(wallet: Database, keystore: KeyStore, chain_view: C) -> Self {
+    pub(crate) fn new(
+        wallet: Database,
+        keystore: KeyStore,
+        chain_view: C,
+        config: Arc<ZalletConfig>,
+    ) -> Self {
         Self {
-            general: RpcImpl::new(wallet, keystore.clone(), chain_view),
+            general: RpcImpl::new(wallet, keystore.clone(), chain_view, config),
             keystore,
             async_ops: RwLock::new(Vec::new()),
         }
@@ -741,6 +838,10 @@ impl<C: Chain> WalletRpcImpl<C> {
 
     async fn chain(&self) -> RpcResult<C> {
         self.general.chain().await
+    }
+
+    fn config(&self) -> Arc<ZalletConfig> {
+        self.general.config()
     }
 
     async fn start_async<F, T>(&self, (context, f): (Option<ContextInfo>, F)) -> OperationId
@@ -1014,10 +1115,69 @@ impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
         .await
     }
 
+    async fn z_propose_transaction(
+        &self,
+        account: JsonValue,
+        fund_source: JsonValue,
+        recipients: Vec<AmountParameter>,
+        minconf: Option<u32>,
+    ) -> z_propose_transaction::Response {
+        z_propose_transaction::call(
+            self.config(),
+            self.wallet().await?,
+            self.keystore.clone(),
+            account,
+            fund_source,
+            recipients,
+            minconf,
+        )
+        .await
+    }
+
+    async fn z_finalize_transaction(
+        &self,
+        account: JsonValue,
+        pczt: String,
+        privacy_policy: String,
+    ) -> z_finalize_transaction::Response {
+        z_finalize_transaction::call(
+            self.config(),
+            self.wallet().await?,
+            self.keystore.clone(),
+            self.chain().await?,
+            account,
+            pczt,
+            privacy_policy,
+        )
+        .await
+    }
+
+    async fn z_send_from_account(
+        &self,
+        account: JsonValue,
+        fund_source: JsonValue,
+        recipients: Vec<AmountParameter>,
+        minconf: Option<u32>,
+        privacy_policy: String,
+    ) -> z_send_from_account::Response {
+        z_send_from_account::call(
+            self.config(),
+            self.wallet().await?,
+            self.keystore.clone(),
+            self.chain().await?,
+            account,
+            fund_source,
+            recipients,
+            minconf,
+            privacy_policy,
+        )
+        .await
+    }
+
     async fn z_send_many(
         &self,
         fromaddress: String,
-        amounts: Vec<z_send_many::AmountParameter>,
+        amounts: Vec<AmountParameter>,
         minconf: Option<u32>,
         fee: Option<JsonValue>,
         privacy_policy: Option<String>,
@@ -1025,6 +1185,7 @@ impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
         Ok(self
             .start_async(
                 z_send_many::call(
+                    self.config(),
                     self.wallet().await?,
                     self.keystore.clone(),
                     self.chain().await?,
@@ -1049,6 +1210,7 @@ impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
         privacy_policy: Option<String>,
     ) -> z_shieldcoinbase::Response {
         let (preflight, context, fut) = z_shieldcoinbase::call(
+            self.config(),
             self.wallet().await?,
             self.keystore.clone(),
             self.chain().await?,
