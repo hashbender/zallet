@@ -29,6 +29,8 @@ use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::value::Zatoshis;
 
 use crate::components::json_rpc::payments::enforce_privacy_policy;
+use std::sync::Arc;
+
 use crate::{
     components::{
         chain::Chain,
@@ -41,6 +43,7 @@ use crate::{
         },
         keystore::KeyStore,
     },
+    config::ZalletConfig,
     prelude::*,
 };
 
@@ -142,6 +145,7 @@ pub(super) const COINBASE_INPUTS_WARN_THRESHOLD: u64 = 400;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn call<C: Chain>(
+    config: Arc<ZalletConfig>,
     mut wallet: DbHandle,
     keystore: KeyStore,
     chain: C,
@@ -316,6 +320,7 @@ pub(crate) async fn call<C: Chain>(
             }),
         )),
         run(
+            config,
             wallet,
             chain,
             proposal,
@@ -500,6 +505,7 @@ fn enumerate_eligible(
 
 /// Construct and broadcast the shielding transaction.
 async fn run<C: Chain>(
+    config: Arc<ZalletConfig>,
     mut wallet: DbHandle,
     chain: C,
     proposal: Proposal<StandardFeeRule, Infallible>,
@@ -527,7 +533,7 @@ async fn run<C: Chain>(
         LegacyCode::Wallet.with_message(format!("Failed to build shielding transaction: {e}"))
     })?;
 
-    broadcast_transactions(&wallet, chain, txids.into()).await
+    broadcast_transactions(&config, &wallet, chain, txids.into()).await
 }
 
 #[cfg(test)]

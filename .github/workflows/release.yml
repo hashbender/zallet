@@ -20,7 +20,7 @@ permissions:
 jobs:
   set_env:
     name: Prepare release metadata
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     outputs:
       tags: ${{ steps.version_step.outputs.tags }}
       should_run: ${{ steps.version_step.outputs.should_run }}
@@ -129,7 +129,7 @@ jobs:
     name: Assemble multi-arch image manifest
     needs: [set_env, container, container_arm64]
     if: needs.set_env.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     permissions:
       contents: read
       id-token: write
