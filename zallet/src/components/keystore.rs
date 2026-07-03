@@ -172,7 +172,7 @@ impl KeyStore {
     pub(crate) fn new(config: &ZalletConfig, db: Database) -> Result<Self, Error> {
         // TODO: Maybe support storing the identity in `zallet.toml` instead of as a
         //       separate file on disk?
-        //       https://github.com/zcash/wallet/issues/253
+        //       https://github.com/zcash/zallet/issues/253
         let path = config.encryption_identity();
         if !path.exists() {
             return Err(ErrorKind::Init
@@ -779,11 +779,11 @@ impl KeyStore {
                 Err(_) => continue,
             };
             let dfvk = DiversifiableFullViewingKey::from_bytes(&dfvk_array);
-            if let Some(dfvk) = dfvk {
-                if dfvk.decrypt_diversifier(address).is_some() {
-                    let extsk = decrypt_standalone_sapling_extsk(&identities, &encrypted_extsk)?;
-                    return Ok(Some(extsk));
-                }
+            if let Some(dfvk) = dfvk
+                && dfvk.decrypt_diversifier(address).is_some()
+            {
+                let extsk = decrypt_standalone_sapling_extsk(&identities, &encrypted_extsk)?;
+                return Ok(Some(extsk));
             }
         }
 

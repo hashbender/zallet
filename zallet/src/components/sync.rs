@@ -46,7 +46,7 @@ use std::ops::Range;
 use tokio::{sync::Notify, time};
 #[cfg(not(feature = "spend-index"))]
 use zcash_client_backend::data_api::{
-    InputSource, TransactionsInvolvingAddress, TransparentOutputFilter,
+    CoinbaseFilter, InputSource, TransactionsInvolvingAddress,
     wallet::{ConfirmationsPolicy, TargetHeight},
 };
 use zcash_client_backend::{
@@ -522,7 +522,7 @@ async fn steady_state_iteration<C: Chain>(
                 info!("Scanning mempool tx {}", tx.txid());
                 // TODO: Route individual-transaction scanning through the batch
                 // decryptor (`Handle::queue_tx`) once a single-tx store path exists.
-                // See zcash/wallet#477.
+                // See zcash/zallet#477.
                 decrypt_and_store_transaction(params, db_data, &tx, None)?;
             }
 
@@ -665,7 +665,7 @@ async fn service_address_request<V: ChainView>(
         &address,
         TargetHeight::from(view_tip + 1),
         ConfirmationsPolicy::MIN,
-        TransparentOutputFilter::All,
+        CoinbaseFilter::AllTransparentOutputs,
     )?;
     let any_spent = our_outputs.iter().any(|output| {
         let outpoint = output.outpoint();
@@ -744,7 +744,7 @@ async fn data_requests<C: Chain>(
                     {
                         // TODO: Route individual-transaction scanning through the batch
                         // decryptor (`Handle::queue_tx`) once a single-tx store path
-                        // exists. See zcash/wallet#477.
+                        // exists. See zcash/zallet#477.
                         decrypt_and_store_transaction(params, db_data, &tx.inner, tx.mined_height)?;
                     } else {
                         db_data
