@@ -6,7 +6,7 @@ use tokio::{pin, select};
 use crate::{
     cli::StartCmd,
     commands::AsyncRunnable,
-    components::{chain::ChainBackend, database::Database, json_rpc::JsonRpc, sync::WalletSync},
+    components::{chain::ChainFactory, database::Database, json_rpc::JsonRpc, sync::WalletSync},
     config::ZalletConfig,
     error::Error,
     fl,
@@ -16,8 +16,9 @@ use crate::{
 #[cfg(zallet_build = "wallet")]
 use crate::components::keystore::KeyStore;
 
-impl AsyncRunnable for StartCmd {
-    async fn run(&self) -> Result<(), Error> {
+impl StartCmd {
+    /// Runs `zallet start` against the chain backend produced by `factory`.
+    pub(crate) async fn run_with<F: ChainFactory>(factory: &F) -> Result<(), Error> {
         let config = APP.config();
         let _lock = config.lock_datadir()?;
 
@@ -48,7 +49,7 @@ impl AsyncRunnable for StartCmd {
         let keystore = KeyStore::new(&config, db.clone())?;
 
         // Start monitoring the chain.
-        let (chain, chain_indexer_task_handle) = ChainBackend::new(&config).await?;
+        let (chain, chain_indexer_task_handle) = factory.build(&config).await?;
 
         // Launch RPC server.
         let rpc_task_handle = JsonRpc::spawn(
@@ -148,6 +149,12 @@ impl AsyncRunnable for StartCmd {
         info!("All tasks have been asked to stop, waiting for remaining tasks to finish");
 
         res
+    }
+}
+
+impl AsyncRunnable for StartCmd {
+    async fn run(&self) -> Result<(), Error> {
+        crate::application::chain_runtime().run_start().await
     }
 }
 
