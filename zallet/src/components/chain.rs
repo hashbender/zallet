@@ -33,6 +33,8 @@ use crate::error::{Error, ErrorKind};
 use crate::fl;
 use crate::network::{NETWORK_UPGRADES, Network};
 
+use crate::{components::TaskHandle, config::ZalletConfig};
+
 mod error;
 pub(crate) use error::ChainError;
 
@@ -43,13 +45,16 @@ mod read_state;
 
 #[cfg(feature = "zaino")]
 mod zaino;
+// TODO(#540 phase 1, task 2): the backend factories gain consumers and these allows are removed.
 #[cfg(feature = "zaino")]
-pub(crate) use zaino::ZainoChain;
+#[allow(unused_imports)]
+pub(crate) use zaino::{ZainoBackend, ZainoChain};
 
 #[cfg(feature = "zebra-state")]
 mod zebra;
 #[cfg(feature = "zebra-state")]
-pub(crate) use zebra::ZebraChain;
+#[allow(unused_imports)]
+pub(crate) use zebra::{ZebraBackend, ZebraChain};
 
 /// The concrete chain backend selected at compile time by the `zaino` / `zebra-state`
 /// feature. Construction sites name this; everything else is generic over [`Chain`].
@@ -57,6 +62,25 @@ pub(crate) use zebra::ZebraChain;
 pub(crate) type ChainBackend = ZainoChain;
 #[cfg(feature = "zebra-state")]
 pub(crate) type ChainBackend = ZebraChain;
+
+/// A capability for constructing the process's chain backend.
+///
+/// Implemented by a unit struct in each backend module. The selected factory is
+/// registered at boot and consumed through a dyn-safe runtime boundary;
+/// everything downstream of construction is statically dispatched over [`Chain`].
+// TODO(#540 phase 1, task 3): the factory is registered at boot and this allow removed.
+#[allow(dead_code)]
+pub(crate) trait ChainFactory: Send + Sync + 'static {
+    /// The concrete chain backend this factory constructs.
+    type Chain: Chain;
+
+    /// Connects to the chain-data source described by `config`, returning the
+    /// backend handle and the task driving its indexer.
+    fn build(
+        &self,
+        config: &ZalletConfig,
+    ) -> impl Future<Output = Result<(Self::Chain, TaskHandle), Error>> + Send;
+}
 
 /// A handle to a source of Zcash chain data.
 ///
