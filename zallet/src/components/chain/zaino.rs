@@ -46,7 +46,7 @@ use crate::{
 };
 
 use super::read_state::{AbortOnDrop, init_read_state_service};
-use super::{BlockLocator, Chain, ChainBlock, ChainError, ChainTx, ChainView};
+use super::{BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView};
 
 /// Classifies a block-fetch error, distinguishing transient reorg-window failures from
 /// genuine backend errors.
@@ -249,6 +249,20 @@ impl ZainoChain {
         });
 
         Ok((chain, task))
+    }
+}
+
+/// Factory for the `zaino` chain backend.
+// TODO(#540 phase 1, task 2): constructed by the command layer; allow removed then.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ZainoBackend;
+
+impl ChainFactory for ZainoBackend {
+    type Chain = ZainoChain;
+
+    async fn build(&self, config: &ZalletConfig) -> Result<(ZainoChain, TaskHandle), Error> {
+        ZainoChain::new(config).await
     }
 }
 
