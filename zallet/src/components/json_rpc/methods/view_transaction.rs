@@ -6,7 +6,9 @@ use orchard::note_encryption::OrchardDomain;
 use rusqlite::{OptionalExtension, named_params};
 use schemars::JsonSchema;
 use serde::Serialize;
-use transparent::keys::TransparentKeyScope;
+use transparent::{address::TransparentAddress, keys::TransparentKeyScope};
+use zaino_proto::proto::service::BlockId;
+use zaino_state::{FetchServiceSubscriber, LightWalletIndexer, ZcashIndexer};
 use zcash_address::{
     ToAddress, ZcashAddress,
     unified::{self, Encoding},
@@ -16,14 +18,15 @@ use zcash_client_sqlite::{AccountUuid, error::SqliteClientError};
 use zcash_keys::encoding::AddressCodec;
 use zcash_note_encryption::{try_note_decryption, try_output_recovery_with_ovk};
 use zcash_protocol::{
-    ShieldedPool, TxId,
+    ShieldedProtocol, TxId,
     consensus::{BlockHeight, Parameters},
     memo::Memo,
     value::{BalanceError, Zatoshis},
 };
+use zcash_script::script;
+use zebra_rpc::methods::GetRawTransaction;
 
 use crate::components::{
-    chain::{Chain, ChainView},
     database::DbConnection,
     json_rpc::{
         server::LegacyCode,
@@ -33,8 +36,13 @@ use crate::components::{
 
 #[cfg(zallet_build = "wallet")]
 use {
-    crate::components::json_rpc::utils::{JsonZecBalance, value_from_zat_balance},
+    crate::components::{
+        json_rpc::utils::{JsonZecBalance, value_from_zat_balance},
+        keystore::KeyStore,
+    },
+    secrecy::ExposeSecret,
     zcash_protocol::value::ZatBalance,
+    zcash_spec::PrfExpand,
 };
 
 const POOL_TRANSPARENT: &str = "transparent";
@@ -274,13 +282,50 @@ struct AccountEffect {
 
 pub(super) const PARAM_TXID_DESC: &str = "The ID of the transaction to view.";
 
-pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &str) -> Response {
+/// The BLAKE2b personalization used by `zcashd`'s very-legacy transparent shielding OVK
+/// derivation.
+#[cfg(zallet_build = "wallet")]
+const ZCASH_TADDR_OVK_PERSONALIZATION: &[u8; 16] = b"ZcTaddrToSapling";
+
+/// Derives the Sapling outgoing viewing key that `zcashd` used when shielding funds from a
+/// transparent address, so that transparent→shielded spends made by such wallets can be
+/// detected.
+///
+/// Ported from `ovkForShieldingFromTaddr` in zcashd's `src/zcash/address/zip32.cpp`.
+#[cfg(zallet_build = "wallet")]
+fn ovk_for_shielding_from_taddr(raw_seed: &[u8]) -> [u8; 32] {
+    // I = BLAKE2b-512("ZcTaddrToSapling", raw_seed)
+    let intermediate = blake2b_simd::Params::new()
+        .hash_length(64)
+        .personal(ZCASH_TADDR_OVK_PERSONALIZATION)
+        .hash(raw_seed);
+
+    // I_L = I[0..32]
+    let mut i_l = [0u8; 32];
+    i_l.copy_from_slice(&intermediate.as_bytes()[..32]);
+
+    // ovk = truncate_32(PRF^expand(I_L, [0x02])); `PrfExpand::SAPLING_OVK` is the [0x02]
+    // domain (see `sapling::keys::ExpandedSpendingKey::from_spending_key`).
+    let mut ovk = [0u8; 32];
+    ovk.copy_from_slice(&PrfExpand::SAPLING_OVK.with(&i_l)[..32]);
+    ovk
+}
+
+pub(crate) async fn call(
+    wallet: &DbConnection,
+    #[cfg(zallet_build = "wallet")] keystore: &KeyStore,
+    chain: FetchServiceSubscriber,
+    txid_str: &str,
+) -> Response {
     let txid = parse_txid(txid_str)?;
 
-    let chain_view = chain
-        .snapshot()
-        .await
-        .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?;
+    // Fetch this early so we can detect if the wallet is not ready yet.
+    // TODO: Replace with Zaino `ChainIndex` so we can operate against a chain snapshot.
+    //       https://github.com/zcash/wallet/issues/237
+    let chain_height = wallet
+        .chain_height()
+        .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?
+        .ok_or_else(|| LegacyCode::InWarmup.with_static("Wait for the wallet to start up"))?;
 
     let tx = wallet
         .get_transaction(txid)
@@ -291,7 +336,7 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
 
     // TODO: Should we enforce ZIP 212 when viewing outputs of a transaction that is
     //       already in the wallet?
-    //       https://github.com/zcash/zallet/issues/254
+    //       https://github.com/zcash/wallet/issues/254
     let zip212_enforcement = sapling::note_encryption::Zip212Enforcement::GracePeriod;
 
     let mut spends = vec![];
@@ -338,18 +383,54 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
         }
     }
 
+    // Very old `zcashd` wallets shielded funds directly from a transparent address to a
+    // Sapling address using an OVK derived from the wallet's HD seed, predating the
+    // ZIP 316 transparent OVK derivation collected above. Re-derive that legacy OVK for
+    // every seed we hold so we can still detect these historical "spend from transparent
+    // to external shielded" outputs. This requires the seed, so it is best-effort: if the
+    // wallet is locked we simply skip it (the modern OVKs above still apply).
+    #[cfg(zallet_build = "wallet")]
+    {
+        // Mnemonic seeds use the BIP 39 seed bytes; legacy non-mnemonic seeds use their
+        // raw imported bytes. Either could have been the active `zcashd` HD seed, so try
+        // both. Decryption fails when the wallet is locked, so skip on error rather than
+        // failing the whole request.
+        for seed_fp in keystore
+            .list_seed_fingerprints()
+            .await
+            .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?
+        {
+            if let Ok(seed) = keystore.decrypt_seed(&seed_fp).await {
+                ovks.push((
+                    ovk_for_shielding_from_taddr(seed.expose_secret()),
+                    zip32::Scope::External,
+                ));
+            }
+        }
+        for seed_fp in keystore
+            .list_legacy_seed_fingerprints()
+            .await
+            .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?
+        {
+            if let Ok(seed) = keystore.decrypt_legacy_seed(&seed_fp).await {
+                ovks.push((
+                    ovk_for_shielding_from_taddr(seed.expose_secret()),
+                    zip32::Scope::External,
+                ));
+            }
+        }
+    }
+
     // TODO: Add `WalletRead::get_note_with_nullifier`
     type OutputInfo = (TxId, u16, AccountUuid, Option<String>, Zatoshis);
     fn output_with_nullifier(
         wallet: &DbConnection,
-        pool: ShieldedPool,
+        pool: ShieldedProtocol,
         nf: [u8; 32],
     ) -> RpcResult<Option<OutputInfo>> {
         let (pool_prefix, output_prefix) = match pool {
-            ShieldedPool::Sapling => ("sapling", "output"),
-            ShieldedPool::Orchard => ("orchard", "action"),
-            // Ironwood is not yet supported; elide such spends rather than failing the call.
-            ShieldedPool::Ironwood => return Ok(None),
+            ShieldedProtocol::Sapling => ("sapling", "output"),
+            ShieldedProtocol::Orchard => ("orchard", "action"),
         };
 
         wallet
@@ -388,16 +469,10 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
     fn sent_to_address(
         wallet: &DbConnection,
         txid: &TxId,
-        pool: ShieldedPool,
+        pool: ShieldedProtocol,
         idx: u16,
         fallback_addr: impl FnOnce() -> Option<String>,
     ) -> RpcResult<Option<String>> {
-        let output_pool = match pool {
-            ShieldedPool::Sapling => 2,
-            ShieldedPool::Orchard => 3,
-            // Ironwood is not yet supported; elide the sent-to address rather than failing.
-            ShieldedPool::Ironwood => return Ok(None),
-        };
         Ok(wallet
             .with_raw(|conn, _| {
                 conn.query_row(
@@ -409,7 +484,10 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
                             AND   output_index = :output_index",
                     named_params! {
                         ":txid": txid.as_ref(),
-                        ":output_pool": output_pool,
+                        ":output_pool": match pool {
+                            ShieldedProtocol::Sapling => 2,
+                            ShieldedProtocol::Orchard => 3,
+                        },
                         ":output_index": idx,
                     },
                     |row| row.get("to_address"),
@@ -435,19 +513,21 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
             for (input, idx) in bundle.vin.iter().zip(0u16..) {
                 let txid_prev = input.prevout().txid().to_string();
 
+                // TODO: Migrate to a hopefully much nicer Rust API once we migrate to the new Zaino ChainIndex trait.
+                //       https://github.com/zcash/wallet/issues/237
                 let (account_uuid, address, value) =
-                    match chain_view.get_transaction(*input.prevout().txid()).await {
-                        Ok(Some(prev_tx)) => {
-                            let output = prev_tx
-                                .inner
-                                .transparent_bundle()
-                                .and_then(|b| {
-                                    b.vout.get(
-                                        usize::try_from(input.prevout().n()).expect("should fit"),
-                                    )
-                                })
+                    match chain.get_raw_transaction(txid_prev.clone(), Some(1)).await {
+                        Ok(GetRawTransaction::Object(tx)) => {
+                            let output = tx
+                                .outputs()
+                                .get(usize::try_from(input.prevout().n()).expect("should fit"))
                                 .expect("Zaino should have rejected this earlier");
-                            let address = output.recipient_address();
+                            let address = script::FromChain::parse(&script::Code(
+                                output.script_pub_key().hex().as_raw_bytes().to_vec(),
+                            ))
+                            .ok()
+                            .as_ref()
+                            .and_then(TransparentAddress::from_script_from_chain);
 
                             let account_id = address.as_ref().and_then(|address| {
                                 account_ids.iter().find(|account| {
@@ -461,10 +541,11 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
                             (
                                 account_id.map(|account| account.expose_uuid().to_string()),
                                 address.map(|addr| addr.encode(wallet.params())),
-                                output.value(),
+                                Zatoshis::from_nonnegative_i64(output.value_zat())
+                                    .expect("Zaino should have rejected this earlier"),
                             )
                         }
-                        Ok(None) => unreachable!(),
+                        Ok(_) => unreachable!(),
                         Err(_) => todo!(),
                     };
 
@@ -492,7 +573,7 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
         // Sapling spends
         for (spend, idx) in bundle.shielded_spends().iter().zip(0..) {
             let spent_note =
-                output_with_nullifier(wallet, ShieldedPool::Sapling, spend.nullifier().0)?;
+                output_with_nullifier(wallet, ShieldedProtocol::Sapling, spend.nullifier().0)?;
 
             if let Some((txid_prev, output_prev, account_id, address, value)) = spent_note {
                 spends.push(Spend {
@@ -517,7 +598,7 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
         for (action, idx) in bundle.actions().iter().zip(0..) {
             let spent_note = output_with_nullifier(
                 wallet,
-                ShieldedPool::Orchard,
+                ShieldedProtocol::Orchard,
                 action.nullifier().to_bytes(),
             )?;
 
@@ -666,15 +747,16 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
                         .map(|(n, addr, memo)| (n, None, addr, memo))
                 })
             {
-                let address = sent_to_address(wallet, &txid, ShieldedPool::Sapling, idx, || {
-                    addr.map(|address| {
-                        ZcashAddress::from_sapling(
-                            wallet.params().network_type(),
-                            address.to_bytes(),
-                        )
-                        .encode()
-                    })
-                })?;
+                let address =
+                    sent_to_address(wallet, &txid, ShieldedProtocol::Sapling, idx, || {
+                        addr.map(|address| {
+                            ZcashAddress::from_sapling(
+                                wallet.params().network_type(),
+                                address.to_bytes(),
+                            )
+                            .encode()
+                        })
+                    })?;
                 // Don't need to check `funded_by_this_wallet` because we only reach this
                 // line if the output was decryptable by an IVK (so it doesn't matter) or
                 // an OVK (so it is by definition outgoing, even if we can't currently
@@ -775,18 +857,19 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
                         .map(|(n, addr, memo)| (n, None, addr, memo))
                 })
             {
-                let address = sent_to_address(wallet, &txid, ShieldedPool::Orchard, idx, || {
-                    addr.map(|address| {
-                        ZcashAddress::from_unified(
-                            wallet.params().network_type(),
-                            unified::Address::try_from_items(vec![unified::Receiver::Orchard(
-                                address.to_raw_address_bytes(),
-                            )])
-                            .expect("valid"),
-                        )
-                        .encode()
-                    })
-                })?;
+                let address =
+                    sent_to_address(wallet, &txid, ShieldedProtocol::Orchard, idx, || {
+                        addr.map(|address| {
+                            ZcashAddress::from_unified(
+                                wallet.params().network_type(),
+                                unified::Address::try_from_items(vec![unified::Receiver::Orchard(
+                                    address.to_raw_address_bytes(),
+                                )])
+                                .expect("valid"),
+                            )
+                            .encode()
+                        })
+                    })?;
                 // Don't need to check `funded_by_this_wallet` because we only reach this
                 // line if the output was decryptable by an IVK (so it doesn't matter) or
                 // an OVK (so it is by definition outgoing, even if we can't currently
@@ -820,12 +903,7 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
         }
     }
 
-    let chain_tip = chain_view
-        .tip()
-        .await
-        .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?;
-
-    let wallet_tx_info = WalletTxInfo::fetch(wallet, &chain_view, &tx, chain_tip.height)
+    let wallet_tx_info = WalletTxInfo::fetch(wallet, &chain, &tx, chain_height)
         .await
         .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?;
 
@@ -903,9 +981,9 @@ struct WalletTxInfo {
 
 impl WalletTxInfo {
     /// Logic adapted from `WalletTxToJSON` in `zcashd`, to match the semantics of the `gettransaction` fields.
-    async fn fetch<V: ChainView>(
+    async fn fetch(
         wallet: &DbConnection,
-        chain_view: &V,
+        chain: &FetchServiceSubscriber,
         tx: &zcash_primitives::transaction::Transaction,
         chain_height: BlockHeight,
     ) -> Result<Self, SqliteClientError> {
@@ -916,7 +994,7 @@ impl WalletTxInfo {
                 Some(mined_height) => i64::from(chain_height + 1 - mined_height),
                 None => {
                     // TODO: Also check if the transaction is in the mempool.
-                    //       https://github.com/zcash/zallet/issues/237
+                    //       https://github.com/zcash/wallet/issues/237
                     -1
                 }
             }
@@ -936,23 +1014,35 @@ impl WalletTxInfo {
         let (blockhash, blockindex, blocktime) = if let Some(height) = mined_height {
             status = "mined";
 
-            let block = chain_view
-                .get_block(height)
-                .await
-                .map_err(|_| SqliteClientError::ChainHeightUnknown)?
-                .ok_or(SqliteClientError::ChainHeightUnknown)?;
+            // TODO: Once Zaino updates its API to support atomic queries, it should not
+            //       be possible to fail to fetch the block that a transaction was
+            //       observed mined in.
+            //       https://github.com/zcash/wallet/issues/237
+            // TODO: Block data optional until we migrate to `ChainIndex`.
+            //       https://github.com/zcash/wallet/issues/237
+            if let Some(block_metadata) = wallet.block_metadata(height)? {
+                let block = chain
+                    .get_block(BlockId {
+                        height: 0,
+                        hash: block_metadata.block_hash().0.to_vec(),
+                    })
+                    .await
+                    .map_err(|_| SqliteClientError::ChainHeightUnknown)?;
 
-            let tx_index = block
-                .vtx()
-                .iter()
-                .zip(0..)
-                .find_map(|(ctx, index)| (ctx.txid() == tx.txid()).then_some(index));
+                let tx_index = block
+                    .vtx
+                    .iter()
+                    .find(|ctx| ctx.txid == tx.txid().as_ref())
+                    .map(|ctx| u32::try_from(ctx.index).expect("Zaino should provide valid data"));
 
-            (
-                Some(block.header().hash().to_string()),
-                tx_index,
-                Some(block.header().time.into()),
-            )
+                (
+                    Some(block_metadata.block_hash().to_string()),
+                    tx_index,
+                    Some(block.time.into()),
+                )
+            } else {
+                (None, None, None)
+            }
         } else {
             match (
                 is_expired_tx(tx, chain_height),
@@ -994,4 +1084,37 @@ fn is_expiring_soon_tx(
     next_height: BlockHeight,
 ) -> bool {
     is_expired_tx(tx, next_height + TX_EXPIRING_SOON_THRESHOLD)
+}
+
+#[cfg(all(test, zallet_build = "wallet"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ovk_for_shielding_from_taddr_matches_zcashd() {
+        // Known-answer test. The seed is `[0x00, 0x01, ..., 0x1f]` and the expected OVK
+        // was produced by an independent reference implementation of zcashd's
+        // `ovkForShieldingFromTaddr` (BLAKE2b-512 personalized with "ZcTaddrToSapling"
+        // over the seed, then PRF^expand with tag `0x02`):
+        //
+        //   I   = BLAKE2b-512("ZcTaddrToSapling", seed)
+        //   ovk = BLAKE2b-512("Zcash_ExpandSeed", I[0..32] || 0x02)[0..32]
+        let seed: [u8; 32] = core::array::from_fn(|i| i as u8);
+        let expected: [u8; 32] = [
+            0x92, 0x08, 0x16, 0x7e, 0x68, 0xc9, 0xd7, 0x6d, 0xed, 0x9b, 0x6a, 0x97, 0xb6, 0x9b,
+            0x31, 0x26, 0x4b, 0x90, 0xc4, 0x50, 0x2a, 0x81, 0x73, 0x03, 0xd4, 0x38, 0xad, 0xb1,
+            0x4b, 0x8e, 0x97, 0xc1,
+        ];
+        assert_eq!(ovk_for_shielding_from_taddr(&seed), expected);
+    }
+
+    #[test]
+    fn prf_ovk_step_matches_sapling() {
+        // Anchor the second (PRF^expand) step against `sapling-crypto`'s own OVK
+        // derivation, so that only the "ZcTaddrToSapling" personalization rests on a
+        // literal rather than a maintained, tested implementation.
+        let i_l = [7u8; 32];
+        let expsk = sapling::keys::ExpandedSpendingKey::from_spending_key(&i_l);
+        assert_eq!(&PrfExpand::SAPLING_OVK.with(&i_l)[..32], &expsk.ovk.0[..]);
+    }
 }

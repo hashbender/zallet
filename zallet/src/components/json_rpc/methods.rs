@@ -3,6 +3,7 @@ use jsonrpsee::{
     core::{JsonValue, RpcResult},
     proc_macros::rpc,
 };
+use zaino_state::FetchServiceSubscriber;
 
 use crate::components::{
     chain::Chain,
@@ -12,7 +13,7 @@ use crate::components::{
 #[cfg(zallet_build = "wallet")]
 use {
     super::asyncop::{AsyncOperation, ContextInfo, OperationId},
-    crate::components::{json_rpc::payments::AmountParameter, keystore::KeyStore},
+    crate::components::keystore::KeyStore,
     serde::Serialize,
     tokio::sync::RwLock,
 };
@@ -20,8 +21,6 @@ use {
 mod convert_tex;
 mod decode_raw_transaction;
 mod decode_script;
-#[cfg(zallet_build = "wallet")]
-mod export_key;
 mod get_account;
 mod get_address_for_account;
 #[cfg(zallet_build = "wallet")]
@@ -38,8 +37,6 @@ mod get_wallet_info;
 mod get_wallet_status;
 #[cfg(zallet_build = "wallet")]
 mod help;
-#[cfg(zallet_build = "wallet")]
-mod import_key;
 mod list_accounts;
 mod list_addresses;
 #[cfg(zallet_build = "wallet")]
@@ -172,7 +169,7 @@ pub(crate) trait Rpc {
     /// - `offset`: An optional number of transactions to skip over before a page of results is
     ///   returned. Defaults to zero.
     /// - `limit`: An optional upper bound on the number of results that should be returned in a
-    ///   page.
+    ///   page.  
     ///
     /// WARNING: This is currently an experimental feature; arguments and result data may change at
     /// any time.
@@ -503,46 +500,6 @@ pub(crate) trait WalletRpc {
         as_of_height: Option<i64>,
     ) -> get_notes_count::Response;
 
-    /// Exports the spending key for a Sapling payment address.
-    ///
-    /// The wallet must be unlocked to use this method.
-    ///
-    /// # Warning
-    ///
-    /// This exports **only** the Sapling spending key. It is **not** a complete backup of
-    /// the funds reachable from this account's root of spending authority: in particular,
-    /// any Orchard funds derived from the same seed are **not** represented by the exported
-    /// key. Do not rely on `z_exportkey` as a wallet backup — use a full seed/wallet backup
-    /// instead, or you may lose access to funds.
-    ///
-    /// # Arguments
-    ///
-    /// - `address` (string, required) The Sapling payment address corresponding to the
-    ///   spending key to export.
-    #[method(name = "z_exportkey")]
-    async fn export_key(&self, address: &str) -> export_key::Response;
-
-    /// Imports a spending key into the wallet.
-    ///
-    /// Only Sapling extended spending keys are supported.
-    ///
-    /// # Arguments
-    ///
-    /// - `key` (string, required) The spending key to import.
-    /// - `rescan` (string, optional, default="whenkeyisnew") Whether to rescan the
-    ///   blockchain for transactions ("yes", "no", or "whenkeyisnew"). When rescan is
-    ///   enabled, the wallet's background sync engine will scan for historical
-    ///   transactions from the given start height.
-    /// - `startHeight` (numeric, optional, default=0) Block height from which to begin
-    ///   the rescan. Only used when rescan is "yes" or "whenkeyisnew" (for a new key).
-    #[method(name = "z_importkey")]
-    async fn import_key(
-        &self,
-        key: &str,
-        rescan: Option<&str>,
-        start_height: Option<u64>,
-    ) -> import_key::Response;
-
     /// Send a transaction with multiple recipients.
     ///
     /// This is an async operation; it returns an operation ID string that you can pass to
@@ -552,14 +509,14 @@ pub(crate) trait WalletRpc {
     ///
     /// Change generated from one or more transparent addresses flows to a new transparent
     /// address, while change generated from a legacy Sapling address returns to itself.
-    /// TODO: <https://github.com/zcash/zallet/issues/138>
+    /// TODO: <https://github.com/zcash/wallet/issues/138>
     ///
     /// When sending from a unified address, change is returned to the internal-only
     /// address for the associated unified account.
     ///
     /// When spending coinbase UTXOs, only shielded recipients are permitted and change is
     /// not allowed; the entire value of the coinbase UTXO(s) must be consumed.
-    /// TODO: <https://github.com/zcash/zallet/issues/137>
+    /// TODO: <https://github.com/zcash/wallet/issues/137>
     ///
     /// # Arguments
     ///
@@ -606,7 +563,7 @@ pub(crate) trait WalletRpc {
     async fn z_send_many(
         &self,
         fromaddress: String,
-        amounts: Vec<AmountParameter>,
+        amounts: Vec<z_send_many::AmountParameter>,
         minconf: Option<u32>,
         fee: Option<JsonValue>,
         privacy_policy: Option<String>,
@@ -683,19 +640,19 @@ pub(crate) trait WalletRpc {
     ) -> z_shieldcoinbase::Response;
 }
 
-pub(crate) struct RpcImpl<C: Chain> {
+pub(crate) struct RpcImpl {
     wallet: Database,
     #[cfg(zallet_build = "wallet")]
     keystore: KeyStore,
-    chain: C,
+    chain: Chain,
 }
 
-impl<C: Chain> RpcImpl<C> {
+impl RpcImpl {
     /// Creates a new instance of the general RPC handler.
     pub(crate) fn new(
         wallet: Database,
         #[cfg(zallet_build = "wallet")] keystore: KeyStore,
-        chain: C,
+        chain: Chain,
     ) -> Self {
         Self {
             wallet,
@@ -712,22 +669,26 @@ impl<C: Chain> RpcImpl<C> {
             .map_err(|_| jsonrpsee::types::ErrorCode::InternalError.into())
     }
 
-    async fn chain(&self) -> RpcResult<C> {
-        Ok(self.chain.clone())
+    async fn chain(&self) -> RpcResult<FetchServiceSubscriber> {
+        self.chain
+            .subscribe()
+            .await
+            .map(|s| s.inner())
+            .map_err(|_| jsonrpsee::types::ErrorCode::InternalError.into())
     }
 }
 
 #[cfg(zallet_build = "wallet")]
-pub(crate) struct WalletRpcImpl<C: Chain> {
-    general: RpcImpl<C>,
+pub(crate) struct WalletRpcImpl {
+    general: RpcImpl,
     keystore: KeyStore,
     async_ops: RwLock<Vec<AsyncOperation>>,
 }
 
 #[cfg(zallet_build = "wallet")]
-impl<C: Chain> WalletRpcImpl<C> {
+impl WalletRpcImpl {
     /// Creates a new instance of the wallet-specific RPC handler.
-    pub(crate) fn new(wallet: Database, keystore: KeyStore, chain_view: C) -> Self {
+    pub(crate) fn new(wallet: Database, keystore: KeyStore, chain_view: Chain) -> Self {
         Self {
             general: RpcImpl::new(wallet, keystore.clone(), chain_view),
             keystore,
@@ -739,7 +700,7 @@ impl<C: Chain> WalletRpcImpl<C> {
         self.general.wallet().await
     }
 
-    async fn chain(&self) -> RpcResult<C> {
+    async fn chain(&self) -> RpcResult<FetchServiceSubscriber> {
         self.general.chain().await
     }
 
@@ -757,7 +718,7 @@ impl<C: Chain> WalletRpcImpl<C> {
 }
 
 #[async_trait]
-impl<C: Chain> RpcServer for RpcImpl<C> {
+impl RpcServer for RpcImpl {
     async fn get_wallet_status(&self) -> get_wallet_status::Response {
         get_wallet_status::call(self.wallet().await?.as_ref(), self.chain().await?).await
     }
@@ -838,7 +799,14 @@ impl<C: Chain> RpcServer for RpcImpl<C> {
     }
 
     async fn view_transaction(&self, txid: &str) -> view_transaction::Response {
-        view_transaction::call(self.wallet().await?.as_ref(), self.chain().await?, txid).await
+        view_transaction::call(
+            self.wallet().await?.as_ref(),
+            #[cfg(zallet_build = "wallet")]
+            &self.keystore,
+            self.chain().await?,
+            txid,
+        )
+        .await
     }
 
     async fn stop(&self) -> stop::Response {
@@ -874,7 +842,7 @@ impl<C: Chain> RpcServer for RpcImpl<C> {
 
 #[cfg(zallet_build = "wallet")]
 #[async_trait]
-impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
+impl WalletRpcServer for WalletRpcImpl {
     fn help(&self, command: Option<&str>) -> help::Response {
         help::call(command)
     }
@@ -993,31 +961,10 @@ impl<C: Chain> WalletRpcServer for WalletRpcImpl<C> {
         get_notes_count::call(self.wallet().await?.as_ref(), minconf, as_of_height)
     }
 
-    async fn export_key(&self, address: &str) -> export_key::Response {
-        export_key::call(self.wallet().await?.as_ref(), &self.keystore, address).await
-    }
-
-    async fn import_key(
-        &self,
-        key: &str,
-        rescan: Option<&str>,
-        start_height: Option<u64>,
-    ) -> import_key::Response {
-        import_key::call(
-            self.wallet().await?.as_mut(),
-            &self.keystore,
-            self.chain().await?,
-            key,
-            rescan,
-            start_height,
-        )
-        .await
-    }
-
     async fn z_send_many(
         &self,
         fromaddress: String,
-        amounts: Vec<AmountParameter>,
+        amounts: Vec<z_send_many::AmountParameter>,
         minconf: Option<u32>,
         fee: Option<JsonValue>,
         privacy_policy: Option<String>,

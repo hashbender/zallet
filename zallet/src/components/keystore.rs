@@ -135,10 +135,12 @@ use super::database::Database;
 
 use crate::fl;
 
-use sapling::zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey};
-
 #[cfg(feature = "zcashd-import")]
-use {transparent::address::TransparentAddress, zcash_keys::address::Address};
+use {
+    sapling::zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
+    transparent::address::TransparentAddress,
+    zcash_keys::address::Address,
+};
 
 pub(super) mod db;
 
@@ -172,7 +174,7 @@ impl KeyStore {
     pub(crate) fn new(config: &ZalletConfig, db: Database) -> Result<Self, Error> {
         // TODO: Maybe support storing the identity in `zallet.toml` instead of as a
         //       separate file on disk?
-        //       https://github.com/zcash/zallet/issues/253
+        //       https://github.com/zcash/wallet/issues/253
         let path = config.encryption_identity();
         if !path.exists() {
             return Err(ErrorKind::Init
@@ -583,6 +585,7 @@ impl KeyStore {
         Ok(legacy_seed_fp)
     }
 
+    #[cfg(feature = "zcashd-import")]
     pub(crate) async fn encrypt_and_store_standalone_sapling_key(
         &self,
         sapling_key: &ExtendedSpendingKey,
@@ -712,6 +715,39 @@ impl KeyStore {
         Ok(seed)
     }
 
+    /// Decrypts the legacy non-mnemonic HD seed with the given fingerprint.
+    ///
+    /// Unlike [`Self::decrypt_seed`], this returns the raw seed bytes exactly as
+    /// they were imported from `zcashd`, which are what the very-legacy
+    /// transparent shielding OVK derivation operates on.
+    pub(crate) async fn decrypt_legacy_seed(
+        &self,
+        seed_fp: &SeedFingerprint,
+    ) -> Result<SecretVec<u8>, Error> {
+        // Acquire a read lock on the identities for decryption.
+        let identities = self.identities.read().await;
+        if identities.is_empty() {
+            return Err(ErrorKind::Generic.context(fl!("err-wallet-locked")).into());
+        }
+
+        let encrypted_legacy_seed = self
+            .with_db(|conn, _| {
+                Ok(conn
+                    .query_row(
+                        "SELECT encrypted_legacy_seed
+                        FROM ext_zallet_keystore_legacy_seeds
+                        WHERE hd_seed_fingerprint = :hd_seed_fingerprint",
+                        named_params! {":hd_seed_fingerprint": seed_fp.to_bytes()},
+                        |row| row.get::<_, Vec<u8>>(0),
+                    )
+                    .map_err(|e| ErrorKind::Generic.context(e))?)
+            })
+            .await?;
+
+        decrypt_secret_bytes(&identities, &encrypted_legacy_seed)
+            .map_err(|e| ErrorKind::Generic.context(e).into())
+    }
+
     /// Exports the mnemonic phrase corresponding to the given seed fingerprint.
     pub(crate) async fn export_mnemonic(
         &self,
@@ -732,62 +768,6 @@ impl KeyStore {
         )?;
 
         Ok(encrypted_mnemonic)
-    }
-
-    /// Decrypts the standalone Sapling spending key corresponding to the given payment
-    /// address, if one exists in the keystore.
-    ///
-    /// Unlike transparent keys (which can be looked up by address via a SQL join), Sapling
-    /// keys require loading all standalone DFVKs and using `decrypt_diversifier` to find
-    /// the one that matches the given payment address. This is because the DB schema only
-    /// stores the DFVK, not the derived payment addresses.
-    pub(crate) async fn decrypt_standalone_sapling_key(
-        &self,
-        address: &sapling::PaymentAddress,
-    ) -> Result<Option<ExtendedSpendingKey>, Error> {
-        // Acquire a read lock on the identities for decryption.
-        let identities = self.identities.read().await;
-        if identities.is_empty() {
-            return Err(ErrorKind::Generic.context(fl!("err-wallet-locked")).into());
-        }
-
-        // Query all standalone sapling keys and find the one matching the address.
-        let rows = self
-            .with_db(|conn, _| {
-                let mut stmt = conn
-                    .prepare(
-                        "SELECT dfvk, encrypted_sapling_extsk
-                         FROM ext_zallet_keystore_standalone_sapling_keys",
-                    )
-                    .map_err(|e| ErrorKind::Generic.context(e))?;
-
-                let rows = stmt
-                    .query_map([], |row| {
-                        Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-                    })
-                    .map_err(|e| ErrorKind::Generic.context(e))?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| ErrorKind::Generic.context(e))?;
-
-                Ok(rows)
-            })
-            .await?;
-
-        for (dfvk_bytes, encrypted_extsk) in rows {
-            let dfvk_array: [u8; 128] = match dfvk_bytes.try_into() {
-                Ok(arr) => arr,
-                Err(_) => continue,
-            };
-            let dfvk = DiversifiableFullViewingKey::from_bytes(&dfvk_array);
-            if let Some(dfvk) = dfvk
-                && dfvk.decrypt_diversifier(address).is_some()
-            {
-                let extsk = decrypt_standalone_sapling_extsk(&identities, &encrypted_extsk)?;
-                return Ok(Some(extsk));
-            }
-        }
-
-        Ok(None)
     }
 
     #[cfg(feature = "zcashd-import")]
@@ -893,6 +873,7 @@ impl Encryptor {
         encrypt_secret(&self.recipients, seed)
     }
 
+    #[cfg(feature = "zcashd-import")]
     fn encrypt_standalone_sapling_key(
         &self,
         key: &ExtendedSpendingKey,
@@ -967,6 +948,33 @@ fn decrypt_string(
     Ok(mnemonic)
 }
 
+/// Decrypts age-encrypted ciphertext into raw secret bytes.
+fn decrypt_secret_bytes(
+    identities: &[Box<dyn age::Identity + Send + Sync>],
+    ciphertext: &[u8],
+) -> Result<SecretVec<u8>, age::DecryptError> {
+    let decryptor = age::Decryptor::new(ciphertext)?;
+
+    // The plaintext is always shorter than the ciphertext. Over-allocating the initial
+    // buffer ensures that no internal re-allocations occur that might leave plaintext
+    // bytes strewn around the heap.
+    let mut buf = Vec::with_capacity(ciphertext.len());
+    let res = decryptor
+        .decrypt(identities.iter().map(|i| i.as_ref() as _))?
+        .read_to_end(&mut buf);
+
+    // We intentionally do not use `?` on the decryption expression because doing so in
+    // the case of a partial failure could result in part of the secret data being read
+    // into `buf`, which would not then be properly zeroized. Instead, we take ownership
+    // of the buffer in construction of a `SecretVec` to ensure that the memory is
+    // zeroed out when we raise the error on the following line.
+    let secret = SecretVec::new(buf);
+    res?;
+
+    Ok(secret)
+}
+
+#[cfg(any(feature = "transparent-key-import", feature = "zcashd-import"))]
 fn encrypt_secret(
     recipients: &[Box<dyn age::Recipient + Send>],
     secret: &SecretVec<u8>,
@@ -981,58 +989,14 @@ fn encrypt_secret(
     Ok(ciphertext)
 }
 
-fn decrypt_standalone_sapling_extsk(
-    identities: &[Box<dyn age::Identity + Send + Sync>],
-    ciphertext: &[u8],
-) -> Result<ExtendedSpendingKey, Error> {
-    let decryptor = age::Decryptor::new(ciphertext).map_err(|e| ErrorKind::Generic.context(e))?;
-
-    // The plaintext is always shorter than the ciphertext. Over-allocating the initial
-    // buffer ensures that no internal re-allocations occur that might leave plaintext
-    // bytes strewn around the heap.
-    let mut buf = Vec::with_capacity(ciphertext.len());
-    let res = decryptor
-        .decrypt(identities.iter().map(|i| i.as_ref() as _))
-        .map_err(|e| ErrorKind::Generic.context(e))?
-        .read_to_end(&mut buf);
-
-    // We intentionally do not use `?` on the decryption expression because doing so in
-    // the case of a partial failure could result in part of the secret data being read
-    // into `buf`, which would not then be properly zeroized. Instead, we take ownership
-    // of the buffer in construction of a `SecretVec` to ensure that the memory is
-    // zeroed out when we raise the error on the following line.
-    let buf_secret = SecretVec::new(buf);
-    res.map_err(|e| ErrorKind::Generic.context(e))?;
-    let extsk = ExtendedSpendingKey::from_bytes(buf_secret.expose_secret())
-        .map_err(|_| ErrorKind::Generic.context("Invalid Sapling extended spending key"))?;
-
-    Ok(extsk)
-}
-
 #[cfg(feature = "transparent-key-import")]
 fn decrypt_standalone_transparent_privkey(
     identities: &[Box<dyn age::Identity + Send + Sync>],
     ciphertext: &[u8],
 ) -> Result<secp256k1::SecretKey, Error> {
-    let decryptor = age::Decryptor::new(ciphertext).map_err(|e| ErrorKind::Generic.context(e))?;
-
-    // The plaintext is always shorter than the ciphertext. Over-allocating the initial
-    // string ensures that no internal re-allocations occur that might leave plaintext
-    // bytes strewn around the heap.
-    let mut buf = Vec::with_capacity(ciphertext.len());
-    let res = decryptor
-        .decrypt(identities.iter().map(|i| i.as_ref() as _))
-        .map_err(|e| ErrorKind::Generic.context(e))?
-        .read_to_end(&mut buf);
-
-    // We intentionally do not use `?` on the decryption expression because doing so in
-    // the case of a partial failure could result in part of the secret data being read
-    // into `buf`, which would not then be properly zeroized. Instead, we take ownership
-    // of the buffer in construction of a `SecretVec` to ensure that the memory is
-    // zeroed out when we raise the error on the following line.
-    let buf_secret = SecretVec::new(buf);
-    res.map_err(|e| ErrorKind::Generic.context(e))?;
-    let secret_key = secp256k1::SecretKey::from_slice(buf_secret.expose_secret())
+    let secret = decrypt_secret_bytes(identities, ciphertext)
+        .map_err(|e| ErrorKind::Generic.context(e))?;
+    let secret_key = secp256k1::SecretKey::from_slice(secret.expose_secret())
         .map_err(|e| ErrorKind::Generic.context(e))?;
 
     Ok(secret_key)
