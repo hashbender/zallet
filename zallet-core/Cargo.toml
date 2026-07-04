@@ -32,6 +32,7 @@ known-folders.workspace = true
 xdg.workspace = true
 
 # Hashing
+blake2b_simd.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 
@@ -98,6 +99,7 @@ zcash_keys = { workspace = true, features = ["zcashd-compat", "unstable"] }
 zcash_primitives.workspace = true
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
 zcash_script.workspace = true
+zcash_spec.workspace = true
 
 # Zcash wallet
 deadpool.workspace = true

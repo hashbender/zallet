@@ -715,6 +715,39 @@ impl KeyStore {
         Ok(seed)
     }
 
+    /// Decrypts the legacy non-mnemonic HD seed with the given fingerprint.
+    ///
+    /// Unlike [`Self::decrypt_seed`], this returns the raw seed bytes exactly as
+    /// they were imported from `zcashd`, which are what the very-legacy
+    /// transparent shielding OVK derivation operates on.
+    pub(crate) async fn decrypt_legacy_seed(
+        &self,
+        seed_fp: &SeedFingerprint,
+    ) -> Result<SecretVec<u8>, Error> {
+        // Acquire a read lock on the identities for decryption.
+        let identities = self.identities.read().await;
+        if identities.is_empty() {
+            return Err(ErrorKind::Generic.context(fl!("err-wallet-locked")).into());
+        }
+
+        let encrypted_legacy_seed = self
+            .with_db(|conn, _| {
+                Ok(conn
+                    .query_row(
+                        "SELECT encrypted_legacy_seed
+                        FROM ext_zallet_keystore_legacy_seeds
+                        WHERE hd_seed_fingerprint = :hd_seed_fingerprint",
+                        named_params! {":hd_seed_fingerprint": seed_fp.to_bytes()},
+                        |row| row.get::<_, Vec<u8>>(0),
+                    )
+                    .map_err(|e| ErrorKind::Generic.context(e))?)
+            })
+            .await?;
+
+        decrypt_secret_bytes(&identities, &encrypted_legacy_seed)
+            .map_err(|e| ErrorKind::Generic.context(e).into())
+    }
+
     /// Exports the mnemonic phrase corresponding to the given seed fingerprint.
     pub(crate) async fn export_mnemonic(
         &self,
@@ -963,6 +996,32 @@ fn decrypt_string(
     Ok(mnemonic)
 }
 
+/// Decrypts age-encrypted ciphertext into raw secret bytes.
+fn decrypt_secret_bytes(
+    identities: &[Box<dyn age::Identity + Send + Sync>],
+    ciphertext: &[u8],
+) -> Result<SecretVec<u8>, age::DecryptError> {
+    let decryptor = age::Decryptor::new(ciphertext)?;
+
+    // The plaintext is always shorter than the ciphertext. Over-allocating the initial
+    // buffer ensures that no internal re-allocations occur that might leave plaintext
+    // bytes strewn around the heap.
+    let mut buf = Vec::with_capacity(ciphertext.len());
+    let res = decryptor
+        .decrypt(identities.iter().map(|i| i.as_ref() as _))?
+        .read_to_end(&mut buf);
+
+    // We intentionally do not use `?` on the decryption expression because doing so in
+    // the case of a partial failure could result in part of the secret data being read
+    // into `buf`, which would not then be properly zeroized. Instead, we take ownership
+    // of the buffer in construction of a `SecretVec` to ensure that the memory is
+    // zeroed out when we raise the error on the following line.
+    let secret = SecretVec::new(buf);
+    res?;
+
+    Ok(secret)
+}
+
 fn encrypt_secret(
     recipients: &[Box<dyn age::Recipient + Send>],
     secret: &SecretVec<u8>,
@@ -1010,25 +1069,9 @@ fn decrypt_standalone_transparent_privkey(
     identities: &[Box<dyn age::Identity + Send + Sync>],
     ciphertext: &[u8],
 ) -> Result<secp256k1::SecretKey, Error> {
-    let decryptor = age::Decryptor::new(ciphertext).map_err(|e| ErrorKind::Generic.context(e))?;
-
-    // The plaintext is always shorter than the ciphertext. Over-allocating the initial
-    // string ensures that no internal re-allocations occur that might leave plaintext
-    // bytes strewn around the heap.
-    let mut buf = Vec::with_capacity(ciphertext.len());
-    let res = decryptor
-        .decrypt(identities.iter().map(|i| i.as_ref() as _))
-        .map_err(|e| ErrorKind::Generic.context(e))?
-        .read_to_end(&mut buf);
-
-    // We intentionally do not use `?` on the decryption expression because doing so in
-    // the case of a partial failure could result in part of the secret data being read
-    // into `buf`, which would not then be properly zeroized. Instead, we take ownership
-    // of the buffer in construction of a `SecretVec` to ensure that the memory is
-    // zeroed out when we raise the error on the following line.
-    let buf_secret = SecretVec::new(buf);
-    res.map_err(|e| ErrorKind::Generic.context(e))?;
-    let secret_key = secp256k1::SecretKey::from_slice(buf_secret.expose_secret())
+    let secret =
+        decrypt_secret_bytes(identities, ciphertext).map_err(|e| ErrorKind::Generic.context(e))?;
+    let secret_key = secp256k1::SecretKey::from_slice(secret.expose_secret())
         .map_err(|e| ErrorKind::Generic.context(e))?;
 
     Ok(secret_key)
