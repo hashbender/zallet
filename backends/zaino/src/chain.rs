@@ -40,7 +40,7 @@ use zebra_rpc::client::{GetAddressBalanceRequest, GetAddressTxIdsRequest};
 
 use zallet_core::{
     components::TaskHandle,
-    config::ZalletConfig,
+    config::{ChainBackendKind, ZalletConfig},
     error::{Error, ErrorKind},
     network::Network,
 };
@@ -299,6 +299,8 @@ pub struct ZainoBackend;
 
 impl ChainFactory for ZainoBackend {
     type Chain = ZainoChain;
+
+    const KIND: ChainBackendKind = ChainBackendKind::Zaino;
 
     async fn build(&self, config: &ZalletConfig) -> Result<(ZainoChain, TaskHandle), Error> {
         ZainoChain::new(config).await

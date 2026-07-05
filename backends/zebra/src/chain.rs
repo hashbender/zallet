@@ -37,7 +37,7 @@ use zallet_core::components::chain::{
 };
 use zallet_core::{
     components::TaskHandle,
-    config::ZalletConfig,
+    config::{ChainBackendKind, ZalletConfig},
     error::{Error, ErrorKind},
     network::Network,
 };
@@ -136,6 +136,8 @@ pub struct ZebraBackend;
 
 impl ChainFactory for ZebraBackend {
     type Chain = ZebraChain;
+
+    const KIND: ChainBackendKind = ChainBackendKind::ZebraState;
 
     async fn build(&self, config: &ZalletConfig) -> Result<(ZebraChain, TaskHandle), Error> {
         ZebraChain::new(config).await

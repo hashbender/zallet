@@ -22,7 +22,11 @@ use zcash_primitives::{
 };
 use zcash_protocol::{TxId, consensus::BlockHeight};
 
-use crate::{components::TaskHandle, config::ZalletConfig, error::Error};
+use crate::{
+    components::TaskHandle,
+    config::{ChainBackendKind, ZalletConfig},
+    error::Error,
+};
 
 mod error;
 pub use error::ChainError;
@@ -35,6 +39,10 @@ pub use error::ChainError;
 pub trait ChainFactory: Send + Sync + 'static {
     /// The concrete chain backend this factory constructs.
     type Chain: Chain;
+
+    /// Which backend this factory provides, as named by the config file's top-level
+    /// `backend` key.
+    const KIND: ChainBackendKind;
 
     /// Connects to the chain-data source described by `config`, returning the
     /// backend handle and the task driving its indexer.
@@ -50,6 +58,10 @@ pub trait ChainFactory: Send + Sync + 'static {
 /// each command, so the concrete [`Chain`] type never crosses this boundary — type
 /// erasure costs one virtual call per command invocation.
 pub trait ChainRuntime: Send + Sync {
+    /// Which backend this runtime provides, as named by the config file's top-level
+    /// `backend` key.
+    fn backend_kind(&self) -> ChainBackendKind;
+
     /// Runs the chain-dependent body of `zallet start`.
     fn run_start(&self) -> BoxFuture<'_, Result<(), Error>>;
 
@@ -67,6 +79,10 @@ pub trait ChainRuntime: Send + Sync {
 }
 
 impl<F: ChainFactory> ChainRuntime for F {
+    fn backend_kind(&self) -> ChainBackendKind {
+        F::KIND
+    }
+
     fn run_start(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(crate::cli::StartCmd::run_with(self))
     }
