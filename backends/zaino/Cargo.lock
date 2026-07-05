@@ -7653,13 +7653,16 @@ dependencies = [
 name = "zallet-zaino"
 version = "0.1.0-alpha.4"
 dependencies = [
+ "abscissa_core",
  "futures",
  "hex",
  "i18n-embed",
  "incrementalmerkletree",
  "jsonrpsee",
+ "once_cell",
  "orchard 0.15.0-pre.2",
  "sapling-crypto",
+ "tempfile",
  "tokio",
  "zaino-common",
  "zaino-fetch",
@@ -8537,8 +8540,3 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[patch.unused]]
-name = "pczt"
-version = "0.7.0"
-source = "git+https://github.com/zcash/librustzcash.git?rev=cac64ba2b47545f23d356002e4a9f02aaaabc083#cac64ba2b47545f23d356002e4a9f02aaaabc083"
