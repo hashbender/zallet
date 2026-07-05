@@ -12,8 +12,9 @@ permissions:
 
 jobs:
   trigger:
+    if: ${{ github.repository == 'zcash/zallet' }}
     name: Trigger
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - name: Trigger aggregation in zcash/rust-ecosystem
         run: >
