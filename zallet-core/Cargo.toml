@@ -10,68 +10,105 @@ license.workspace = true
 categories.workspace = true
 
 [dependencies]
-abscissa_core.workspace = true
-abscissa_tokio.workspace = true
-age.workspace = true
+# Async
 async-trait.workspace = true
-base64ct.workspace = true
-bip0039.workspace = true
-clap = { workspace = true, features = ["string", "unstable-styles"] }
-deadpool.workspace = true
-deadpool-sqlite.workspace = true
-deadpool-sync.workspace = true
-documented.workspace = true
-fmutex.workspace = true
 futures.workspace = true
-hex.workspace = true
-hmac.workspace = true
+tokio = { workspace = true, features = ["fs", "io-std", "io-util", "rt-multi-thread", "signal"] }
+
+# Data structures
+nonempty.workspace = true
+
+# Build script
+shadow-rs.workspace = true
+
+# Documentation
+documented.workspace = true
+phf.workspace = true
+
+# Filesystem
+fmutex.workspace = true
 home.workspace = true
-http-body-util.workspace = true
-hyper.workspace = true
+known-folders.workspace = true
+xdg.workspace = true
+
+# Hashing
+hmac.workspace = true
+sha2.workspace = true
+
+# Key storage
+age.workspace = true
+bip0039.workspace = true
+
+# Localization
 i18n-embed = { workspace = true, features = ["desktop-requester"] }
 i18n-embed-fl.workspace = true
-incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
-jsonrpsee = { workspace = true, features = ["macros", "server"] }
-known-folders.workspace = true
-nix = { workspace = true, features = ["signal"] }
-nonempty.workspace = true
-orchard.workspace = true
-phf.workspace = true
-rand.workspace = true
-rpassword.workspace = true
-rusqlite.workspace = true
-rust_decimal.workspace = true
 rust-embed.workspace = true
-sapling.workspace = true
-schemars.workspace = true
-schemerz.workspace = true
-schemerz-rusqlite.workspace = true
-secp256k1.workspace = true
-secrecy.workspace = true
-serde.workspace = true
+
+# Parsing and serialization
+base64ct.workspace = true
+hex.workspace = true
 semver.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
-shadow-rs.workspace = true
-shardtree.workspace = true
-time.workspace = true
-tempfile.workspace = true
-tokio = { workspace = true, features = ["fs", "io-std", "io-util", "rt-multi-thread", "signal"] }
 toml.workspace = true
-tonic.workspace = true
+zcash_address.workspace = true
+
+# Randomness
+rand.workspace = true
+
+# Secret management
+secrecy.workspace = true
+
+# CLI
+abscissa_core.workspace = true
+abscissa_tokio.workspace = true
+clap = { workspace = true, features = ["string", "unstable-styles"] }
+rpassword.workspace = true
+
+# RPC
+http-body-util.workspace = true
+hyper.workspace = true
+jsonrpsee = { workspace = true, features = ["macros", "server"] }
+jsonrpsee-http-client = { workspace = true, optional = true }
+nix = { workspace = true, features = ["signal"] }
+rust_decimal.workspace = true
+schemars.workspace = true
 tower = { workspace = true, features = ["timeout"] }
+
+# Testing
+tempfile.workspace = true
+
+# Tracing
+console-subscriber = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-log.workspace = true
 tracing-subscriber.workspace = true
+
+# Zcash consensus
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
+
+# Zcash payment protocols
+orchard.workspace = true
+sapling.workspace = true
+secp256k1.workspace = true
 transparent.workspace = true
+zcash_encoding.workspace = true
+zcash_keys = { workspace = true, features = ["zcashd-compat", "unstable"] }
+zcash_primitives.workspace = true
+zcash_proofs = { workspace = true, features = ["bundled-prover"] }
+zcash_script.workspace = true
+
+# Zcash wallet
+deadpool.workspace = true
+deadpool-sqlite.workspace = true
+deadpool-sync.workspace = true
+incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
+rusqlite.workspace = true
+schemerz.workspace = true
+schemerz-rusqlite.workspace = true
+shardtree.workspace = true
+time.workspace = true
 uuid.workspace = true
-which = { workspace = true, optional = true }
-xdg.workspace = true
-zaino-common = { workspace = true, optional = true }
-zallet-zebra-read-state = { path = "../crates/zebra-read-state", optional = true }
-zaino-fetch = { workspace = true, optional = true }
-zaino-state = { workspace = true, optional = true }
-zcash_address.workspace = true
 zcash_client_backend = { workspace = true, features = [
     "lightwalletd-tonic-tls-webpki-roots",
     "orchard",
@@ -82,21 +119,17 @@ zcash_client_sqlite = { workspace = true, features = [
     "orchard",
     "transparent-inputs",
 ] }
-zcash_encoding.workspace = true
-zcash_keys = { workspace = true, features = ["zcashd-compat", "unstable"] }
 zcash_note_encryption.workspace = true
-zcash_primitives.workspace = true
-zcash_proofs = { workspace = true, features = ["bundled-prover"] }
-zcash_protocol = { workspace = true, features = ["local-consensus"] }
-zcash_script.workspace = true
-zebra-rpc = { workspace = true, optional = true }
 zip32.workspace = true
+
+# Zcashd wallet migration
+anyhow.workspace = true
+which = { workspace = true, optional = true }
 zewif = { workspace = true, optional = true }
 zewif-zcashd = { workspace = true, optional = true }
-anyhow.workspace = true
 
-console-subscriber = { workspace = true, optional = true }
-jsonrpsee-http-client = { workspace = true, optional = true }
+# lightwalletd (temporary)
+tonic.workspace = true
 
 [build-dependencies]
 clap = { workspace = true, features = ["string", "unstable-styles"] }
@@ -122,19 +155,6 @@ trycmd.workspace = true
 
 [features]
 default = []
-
-## Zaino-backed chain-data backend.
-##
-## The backend can optionally read finalized state directly from a co-located zebrad's
-## `ReadStateService` when `[indexer.read_state_service]` is configured, instead of
-## fetching all chain data over JSON-RPC.
-zaino = [
-  "dep:zallet-zebra-read-state",
-  "dep:zaino-common",
-  "dep:zaino-fetch",
-  "dep:zaino-state",
-  "dep:zebra-rpc",
-]
 
 ## Enables per-outpoint transparent spend detection: the wallet emits
 ## `TransactionDataRequest::SpendsOfTransparentOutput` and the backend resolves spends via a

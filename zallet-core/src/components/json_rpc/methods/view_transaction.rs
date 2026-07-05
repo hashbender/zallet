@@ -439,7 +439,7 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
                     match chain_view.get_transaction(*input.prevout().txid()).await {
                         Ok(Some(prev_tx)) => {
                             let output = prev_tx
-                                .inner
+                                .inner()
                                 .transparent_bundle()
                                 .and_then(|b| {
                                     b.vout.get(
@@ -825,7 +825,7 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
         .await
         .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?;
 
-    let wallet_tx_info = WalletTxInfo::fetch(wallet, &chain_view, &tx, chain_tip.height)
+    let wallet_tx_info = WalletTxInfo::fetch(wallet, &chain_view, &tx, chain_tip.height())
         .await
         .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?;
 

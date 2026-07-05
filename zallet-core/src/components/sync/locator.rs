@@ -46,7 +46,7 @@ pub(super) fn build_block_locator(
     let mut blocks = Vec::new();
     for height in locator_block_heights(tip) {
         if let Some(hash) = db_data.get_block_hash(height)? {
-            blocks.push(ChainBlock { height, hash });
+            blocks.push(ChainBlock::new(height, hash));
         }
     }
     Ok(BlockLocator::from_blocks(blocks))

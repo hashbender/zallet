@@ -198,7 +198,7 @@ pub(super) async fn scan_blocks<V: ChainView>(
         info!(
             "{} is greater than chain view's tip ({}), skipping",
             scan_range.block_range().start - 1,
-            chain_view.tip().await.map_err(SyncError::Chain)?.height,
+            chain_view.tip().await.map_err(SyncError::Chain)?.height(),
         );
         // The range starts beyond the chain view's tip (a reorg race), so we scanned nothing
         // and have not reached the divergence boundary; let the caller retry.

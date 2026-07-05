@@ -101,8 +101,8 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C) -> Response 
 
     Ok(GetWalletStatus {
         node_tip: ChainTip {
-            blockhash: node_tip.hash.to_string(),
-            height: node_tip.height.into(),
+            blockhash: node_tip.hash().to_string(),
+            height: node_tip.height().into(),
         },
         wallet_tip: wallet_data.as_ref().map(|d| d.chain_tip()),
         fully_synced_height: wallet_data.as_ref().and_then(|d| d.fully_synced_height()),

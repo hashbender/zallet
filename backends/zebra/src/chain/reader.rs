@@ -14,8 +14,8 @@ use zebra_chain::subtree::NoteCommitmentSubtreeIndex;
 use zebra_state::Spend;
 use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadStateService};
 
-use zallet_core::components::chain::{BlockLocator, ChainBlock, ChainError};
 use super::convert;
+use zallet_core::components::chain::{BlockLocator, ChainBlock, ChainError};
 
 /// The header data the height→hash resolve walk needs.
 #[derive(Clone, Debug)]
@@ -121,10 +121,10 @@ impl ReadStateChainReader {
 impl ChainReader for ReadStateChainReader {
     async fn tip(&self) -> Result<Option<ChainBlock>, ChainError> {
         match self.call(ReadRequest::Tip).await? {
-            ReadResponse::Tip(Some((h, hash))) => Ok(Some(ChainBlock {
-                height: convert::height(h),
-                hash: convert::block_hash(hash),
-            })),
+            ReadResponse::Tip(Some((h, hash))) => Ok(Some(ChainBlock::new(
+                convert::height(h),
+                convert::block_hash(hash),
+            ))),
             ReadResponse::Tip(None) => Ok(None),
             other => unreachable!("unexpected response to Tip: {other:?}"),
         }
@@ -219,10 +219,11 @@ impl ChainReader for ReadStateChainReader {
             .call(ReadRequest::FindForkPoint { known_blocks })
             .await?
         {
-            ReadResponse::ForkPoint(opt) => Ok(opt.map(|(h, hash)| ChainBlock {
-                height: convert::height(h),
-                hash: convert::block_hash(hash),
-            })),
+            ReadResponse::ForkPoint(opt) => {
+                Ok(opt.map(|(h, hash)| {
+                    ChainBlock::new(convert::height(h), convert::block_hash(hash))
+                }))
+            }
             other => unreachable!("unexpected response to FindForkPoint: {other:?}"),
         }
     }

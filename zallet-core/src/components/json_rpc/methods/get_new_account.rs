@@ -61,7 +61,7 @@ pub(crate) async fn call<C: Chain>(
                 .tip()
                 .await
                 .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?
-                .height,
+                .height(),
         );
     let treestate_height = chain_height.saturating_sub(1);
 

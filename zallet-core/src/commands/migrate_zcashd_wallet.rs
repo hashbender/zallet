@@ -364,7 +364,7 @@ impl MigrateZcashdWalletCmd {
             let tip = chain_view.tip().await?;
             // A chain tip at height zero means the chain consists of only the genesis
             // block, and contains no usable tree state.
-            let tip_height = (tip.height > BlockHeight::from_u32(0)).then_some(tip.height);
+            let tip_height = (tip.height() > BlockHeight::from_u32(0)).then_some(tip.height());
             (Some(chain_view), tip_height)
         } else {
             info!("No-scan mode: skipping chain scanning");

@@ -29,6 +29,8 @@ use zcash_protocol::{
 use zebra_state::ReadStateService;
 
 #[cfg(feature = "spend-index")]
+use transparent::bundle::OutPoint;
+#[cfg(feature = "spend-index")]
 use zallet_core::components::chain::SpendStatus;
 use zallet_core::components::chain::{
     BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView, ReportedUpgrade,
@@ -39,8 +41,6 @@ use zallet_core::{
     error::{Error, ErrorKind},
     network::Network,
 };
-#[cfg(feature = "spend-index")]
-use transparent::bundle::OutPoint;
 use zallet_zebra_read_state::{AbortOnDrop, init_read_state_service, network_to_zebra};
 
 mod convert;
@@ -161,12 +161,12 @@ impl Chain for ZebraChain {
                     ErrorKind::Init
                         .context(format!("invalid consensus branch ID {branch_id:?}: {e}"))
                 })?;
-                Ok(ReportedUpgrade {
+                Ok(ReportedUpgrade::new(
                     branch_id,
-                    name: upgrade.name,
-                    activation_height: upgrade.activation_height,
-                    status: upgrade.status,
-                })
+                    upgrade.name,
+                    upgrade.activation_height,
+                    upgrade.status,
+                ))
             })
             .collect()
     }
@@ -200,9 +200,9 @@ impl Chain for ZebraChain {
             .await?
             .ok_or_else(|| ChainError::unavailable("the chain state has no tip yet"))?;
         let finalized_floor =
-            BlockHeight::from_u32(u32::from(tip.height).saturating_sub(MAX_REORG_DEPTH));
+            BlockHeight::from_u32(u32::from(tip.height()).saturating_sub(MAX_REORG_DEPTH));
         let mut cache = BTreeMap::new();
-        cache.insert(tip.height, tip.hash);
+        cache.insert(tip.height(), tip.hash());
         Ok(ZebraChainView {
             reader,
             validator_rpc: self.validator_rpc.clone(),
@@ -240,7 +240,7 @@ pub struct ZebraChainView<R: ChainReader = ReadStateChainReader> {
 impl<R: ChainReader> ZebraChainView<R> {
     /// The pinned hash at `height` for this view, or `None` if above the captured tip.
     async fn resolve(&self, height: BlockHeight) -> Result<Option<BlockHash>, ChainError> {
-        if height > self.tip.height {
+        if height > self.tip.height() {
             return Ok(None);
         }
         if height <= self.finalized_floor {
@@ -388,7 +388,7 @@ impl<R: ChainReader> ChainView for ZebraChainView<R> {
     }
 
     fn stream_blocks_to_tip(&self, start: BlockHeight) -> BoxStream<'_, Result<Block, ChainError>> {
-        self.stream_blocks_inner(start, self.tip.height)
+        self.stream_blocks_inner(start, self.tip.height())
     }
 
     fn stream_blocks(
@@ -401,12 +401,12 @@ impl<R: ChainReader> ChainView for ZebraChainView<R> {
     async fn get_mempool_stream(&self) -> Result<Option<BoxStream<'_, Transaction>>, ChainError> {
         // If the tip already moved past the captured view, signal "tip changed" (no stream).
         let current_tip = self.reader.tip().await?;
-        if current_tip.map(|t| t.hash) != Some(self.tip.hash) {
+        if current_tip.map(|t| t.hash()) != Some(self.tip.hash()) {
             return Ok(None);
         }
 
         // Mempool transactions are parsed at the branch of the next block to be mined.
-        let branch_id = BranchId::for_height(&self.params, self.tip.height + 1);
+        let branch_id = BranchId::for_height(&self.params, self.tip.height() + 1);
 
         struct State<R> {
             reader: R,
@@ -421,7 +421,7 @@ impl<R: ChainReader> ChainView for ZebraChainView<R> {
         let state = State {
             reader: self.reader.clone(),
             rpc: self.validator_rpc.clone(),
-            tip_hash: self.tip.hash,
+            tip_hash: self.tip.hash(),
             branch_id,
             seen: HashSet::new(),
             pending: VecDeque::new(),
@@ -439,7 +439,7 @@ impl<R: ChainReader> ChainView for ZebraChainView<R> {
 
                 // End the stream when the chain tip changes (a new block or a reorg).
                 match s.reader.tip().await {
-                    Ok(Some(tip)) if tip.hash == s.tip_hash => {}
+                    Ok(Some(tip)) if tip.hash() == s.tip_hash => {}
                     _ => return None,
                 }
 
@@ -487,26 +487,26 @@ impl<R: ChainReader> ChainView for ZebraChainView<R> {
         // Best chain (mined).
         if let Some(mined) = self.reader.transaction(ztxid).await? {
             let inner = convert::transaction(&mined.raw, &self.params, mined.height)?;
-            return Ok(Some(ChainTx {
+            return Ok(Some(ChainTx::new(
                 inner,
-                raw: mined.raw,
-                block_hash: self.resolve(mined.height).await?,
-                mined_height: Some(mined.height),
-                block_time: Some(mined.block_time),
-            }));
+                mined.raw,
+                self.resolve(mined.height).await?,
+                Some(mined.height),
+                Some(mined.block_time),
+            )));
         }
 
         // Side (non-best) chain: parse at the mempool branch (recent, same network upgrade).
-        let mempool_height = self.tip.height + 1;
+        let mempool_height = self.tip.height() + 1;
         if let Some(side) = self.reader.side_chain_transaction(ztxid).await? {
             let inner = convert::transaction(&side.raw, &self.params, mempool_height)?;
-            return Ok(Some(ChainTx {
+            return Ok(Some(ChainTx::new(
                 inner,
-                raw: side.raw,
-                block_hash: Some(side.block_hash),
-                mined_height: None,
-                block_time: None,
-            }));
+                side.raw,
+                Some(side.block_hash),
+                None,
+                None,
+            )));
         }
 
         // Mempool.
@@ -523,13 +523,7 @@ impl<R: ChainReader> ChainView for ZebraChainView<R> {
                 .map_err(ChainError::backend)?;
             let raw = hex::decode(raw_hex).map_err(ChainError::invalid_data)?;
             let inner = convert::transaction(&raw, &self.params, mempool_height)?;
-            return Ok(Some(ChainTx {
-                inner,
-                raw,
-                block_hash: None,
-                mined_height: None,
-                block_time: None,
-            }));
+            return Ok(Some(ChainTx::new(inner, raw, None, None, None)));
         }
 
         Ok(None)
@@ -627,10 +621,10 @@ mod tests {
 
     impl ChainReader for MockChainReader {
         async fn tip(&self) -> Result<Option<ChainBlock>, ChainError> {
-            Ok(Some(ChainBlock {
-                height: BlockHeight::from_u32(self.tip_height),
-                hash: h(self.tip_height),
-            }))
+            Ok(Some(ChainBlock::new(
+                BlockHeight::from_u32(self.tip_height),
+                h(self.tip_height),
+            )))
         }
         async fn best_chain_block_hash(
             &self,
@@ -707,12 +701,9 @@ mod tests {
         floor: u32,
         calls: Arc<AtomicU32>,
     ) -> ZebraChainView<MockChainReader> {
-        let tip = ChainBlock {
-            height: BlockHeight::from_u32(tip_height),
-            hash: h(tip_height),
-        };
+        let tip = ChainBlock::new(BlockHeight::from_u32(tip_height), h(tip_height));
         let mut cache = BTreeMap::new();
-        cache.insert(tip.height, tip.hash);
+        cache.insert(tip.height(), tip.hash());
         ZebraChainView {
             reader: MockChainReader {
                 tip_height,

@@ -219,11 +219,11 @@ async fn initialize<C: Chain>(
         // Notify the wallet of the current chain tip.
         let chain_view = chain.snapshot().await.map_err(SyncError::Chain)?;
         let current_tip = chain_view.tip().await.map_err(SyncError::Chain)?;
-        info!("Latest block height is {}", current_tip.height);
-        db_data.update_chain_tip(current_tip.height)?;
+        info!("Latest block height is {}", current_tip.height());
+        db_data.update_chain_tip(current_tip.height())?;
 
         // Set the starting boundary between the `steady_state` and `recover_history` tasks.
-        let starting_boundary = update_boundary(BlockHeight::from_u32(0), current_tip.height);
+        let starting_boundary = update_boundary(BlockHeight::from_u32(0), current_tip.height());
 
         let scan_range = match db_data
             .suggest_scan_ranges()?
@@ -257,19 +257,19 @@ async fn initialize<C: Chain>(
                 // the index catches up. We skip at height 0 because `scan_block`
                 // would ask for `tree_state_as_of(height - 1)` and underflow on
                 // `BlockHeight`; there is also no useful work to do at genesis.
-                if current_tip.height > BlockHeight::from_u32(0)
-                    && db_data.block_metadata(current_tip.height)?.is_none()
+                if current_tip.height() > BlockHeight::from_u32(0)
+                    && db_data.block_metadata(current_tip.height())?.is_none()
                 {
                     let attempt = async {
                         let tip_block = chain_view
-                            .get_block(current_tip.height)
+                            .get_block(current_tip.height())
                             .await
                             .map_err(SyncError::Chain)?
                             .ok_or_else(|| {
                                 SyncError::Chain(ChainError::backend(format!(
                                     "chain view did not return its own tip \
                                      block at height {}",
-                                    current_tip.height
+                                    current_tip.height()
                                 )))
                             })?;
                         steps::scan_block(
@@ -361,7 +361,7 @@ async fn locate_fork_point<V: ChainView>(
         .unwrap_or(BlockHeight::from_u32(0));
 
     // Fast path: locate the fork point within the reorg window in one round-trip.
-    let locator = locator::build_block_locator(db_data, prev_tip.height)?;
+    let locator = locator::build_block_locator(db_data, prev_tip.height())?;
     match chain_view
         .find_fork_point(&locator)
         .await
@@ -377,7 +377,8 @@ async fn locate_fork_point<V: ChainView>(
     // back a fixed step at a time, looking for one of its blocks still on the best chain.
     debug!(
         "wallet tip {} (height {}) is not on the best chain; stepping back to find a resume point",
-        prev_tip.hash, prev_tip.height,
+        prev_tip.hash(),
+        prev_tip.height(),
     );
     step_back_to_best_chain(chain_view, prev_tip, birthday, |height| {
         Ok(db_data.get_block_hash(height)?)
@@ -411,7 +412,7 @@ where
     V: ChainView,
     F: Fn(BlockHeight) -> Result<Option<BlockHash>, SyncError>,
 {
-    let mut height = prev_tip.height;
+    let mut height = prev_tip.height();
     loop {
         let (next, reached_birthday) = rewind_step(height, birthday);
         height = next;
@@ -422,7 +423,7 @@ where
                 .map_err(SyncError::Chain)?
                 .map(|header| header.hash());
             if best_chain_hash == Some(wh) {
-                return Ok(ChainBlock { height, hash: wh });
+                return Ok(ChainBlock::new(height, wh));
             }
         }
         if reached_birthday {
@@ -512,12 +513,19 @@ async fn steady_state_iteration<C: Chain>(
     let tip_changed = current_tip != *prev_tip;
 
     if tip_changed {
-        info!("New chain tip: {} {}", current_tip.height, current_tip.hash);
+        info!(
+            "New chain tip: {} {}",
+            current_tip.height(),
+            current_tip.hash()
+        );
         lower_boundary
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current_boundary| {
                 Some(
-                    update_boundary(BlockHeight::from_u32(current_boundary), current_tip.height)
-                        .into(),
+                    update_boundary(
+                        BlockHeight::from_u32(current_boundary),
+                        current_tip.height(),
+                    )
+                    .into(),
                 )
             })
             .expect("closure always returns Some");
@@ -525,36 +533,34 @@ async fn steady_state_iteration<C: Chain>(
 
         // Find where the wallet's history rejoins the backend's best chain.
         let fork_point = locate_fork_point(&chain_view, db_data, *prev_tip).await?;
-        assert!(fork_point.height <= current_tip.height);
+        assert!(fork_point.height() <= current_tip.height());
 
         // Fetch blocks that need to be applied to the wallet.
-        let blocks_to_apply = chain_view.stream_blocks_to_tip(fork_point.height + 1);
+        let blocks_to_apply = chain_view.stream_blocks_to_tip(fork_point.height() + 1);
         tokio::pin!(blocks_to_apply);
 
         // If the fork point is equal to `prev_tip` then no reorg has occurred.
         if fork_point != *prev_tip {
             // Ensured by `find_fork_point`.
-            assert!(fork_point.height < prev_tip.height);
+            assert!(fork_point.height() < prev_tip.height());
 
             // Rewind the wallet to the fork point. `truncate_to_height` fully resets
             // the wallet state to that height, so the blocks in the old fork need no
             // further handling.
             info!(
                 "Chain reorg detected, rewinding to {} {}",
-                fork_point.height, fork_point.hash
+                fork_point.height(),
+                fork_point.hash()
             );
-            db_data.truncate_to_height(fork_point.height)?;
+            db_data.truncate_to_height(fork_point.height())?;
             *prev_tip = fork_point;
         };
 
         // Notify the wallet of block connections.
         while let Some(block) = blocks_to_apply.try_next().await.map_err(SyncError::Chain)? {
             let height = block.claimed_height();
-            assert_eq!(height, prev_tip.height + 1);
-            let current_block = ChainBlock {
-                height,
-                hash: block.header().hash(),
-            };
+            assert_eq!(height, prev_tip.height() + 1);
+            let current_block = ChainBlock::new(height, block.header().hash());
 
             // `scan_block` refuses to scan at or above a known consensus-divergence height,
             // reporting the boundary instead. From there the backing node follows rules this
@@ -585,7 +591,7 @@ async fn steady_state_iteration<C: Chain>(
     // apply loop above with no blocks below the boundary to scan. In that case we must not
     // stream its mempool either, as those transactions are validated under rules this build
     // cannot interpret. Stop and shut down.
-    if let Some(boundary) = shutdown_height.filter(|h| current_tip.height >= *h) {
+    if let Some(boundary) = shutdown_height.filter(|h| current_tip.height() >= *h) {
         return Ok(ControlFlow::Break(boundary));
     }
 
@@ -779,7 +785,7 @@ async fn service_address_request<V: ChainView>(
                 .await
                 .map_err(SyncError::Chain)?
             {
-                decrypt_and_store_transaction(params, db_data, &tx.inner, tx.mined_height)?;
+                decrypt_and_store_transaction(params, db_data, tx.inner(), tx.mined_height())?;
             }
         }
     }
@@ -810,7 +816,7 @@ async fn data_requests<C: Chain>(
             continue;
         }
 
-        let view_tip = chain_view.tip().await.map_err(SyncError::Chain)?.height;
+        let view_tip = chain_view.tip().await.map_err(SyncError::Chain)?.height();
         info!("{} transaction data requests to service", requests.len());
         for request in requests {
             match request {
@@ -841,7 +847,12 @@ async fn data_requests<C: Chain>(
                         // TODO: Route individual-transaction scanning through the batch
                         // decryptor (`Handle::queue_tx`) once a single-tx store path
                         // exists. See zcash/zallet#477.
-                        decrypt_and_store_transaction(params, db_data, &tx.inner, tx.mined_height)?;
+                        decrypt_and_store_transaction(
+                            params,
+                            db_data,
+                            tx.inner(),
+                            tx.mined_height(),
+                        )?;
                     } else {
                         db_data
                             .set_transaction_status(txid, TransactionStatus::TxidNotRecognized)?;
@@ -881,8 +892,8 @@ async fn data_requests<C: Chain>(
                                 decrypt_and_store_transaction(
                                     params,
                                     db_data,
-                                    &tx.inner,
-                                    tx.mined_height,
+                                    &tx.inner(),
+                                    tx.mined_height(),
                                 )?;
                             }
                         }
@@ -1169,23 +1180,14 @@ mod fork_fallback_tests {
             (h(70), header(70).hash()),
         ]);
 
-        let prev_tip = ChainBlock {
-            height: h(100),
-            hash: header(200).hash(),
-        };
+        let prev_tip = ChainBlock::new(h(100), header(200).hash());
         let resume = step_back_to_best_chain(&view, prev_tip, h(0), |height| {
             Ok(wallet.get(&height).copied())
         })
         .await
         .unwrap();
 
-        assert_eq!(
-            resume,
-            ChainBlock {
-                height: h(70),
-                hash: header(70).hash(),
-            }
-        );
+        assert_eq!(resume, ChainBlock::new(h(70), header(70).hash()));
     }
 
     #[tokio::test]
@@ -1201,10 +1203,7 @@ mod fork_fallback_tests {
             (h(70), header(170).hash()),
         ]);
 
-        let prev_tip = ChainBlock {
-            height: h(100),
-            hash: header(200).hash(),
-        };
+        let prev_tip = ChainBlock::new(h(100), header(200).hash());
         let result = step_back_to_best_chain(&view, prev_tip, h(70), |height| {
             Ok(wallet.get(&height).copied())
         })

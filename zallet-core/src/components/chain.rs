@@ -38,11 +38,6 @@ use crate::{components::TaskHandle, config::ZalletConfig};
 mod error;
 pub use error::ChainError;
 
-#[cfg(feature = "zaino")]
-mod zaino;
-#[cfg(feature = "zaino")]
-pub use zaino::ZainoBackend;
-
 /// A capability for constructing the process's chain backend.
 ///
 /// Implemented by a unit struct in each backend module. The selected factory is
@@ -110,7 +105,7 @@ pub trait Chain: Clone + Send + Sync + 'static {
 
     /// The network upgrades the backing full node reports, in backend-neutral form.
     ///
-    /// Consumed by [`check_consensus_compatibility`] to confirm the node’s consensus
+    /// Consumed by `check_consensus_compatibility` to confirm the node’s consensus
     /// rules are compatible with this build of Zallet.
     fn reported_upgrades(&self)
     -> impl Future<Output = Result<Vec<ReportedUpgrade>, Error>> + Send;
@@ -160,18 +155,53 @@ pub enum UpgradeStatus {
 /// A network upgrade reported by a backing full node, in a backend-neutral form.
 ///
 /// Each [`Chain`] backend converts its own representation into this so that the
-/// consensus-compatibility check ([`check_consensus_compatibility`]) is backend-neutral.
+/// consensus-compatibility check (`check_consensus_compatibility`) is backend-neutral.
 #[derive(Clone)]
 pub struct ReportedUpgrade {
+    branch_id: u32,
+    name: String,
+    activation_height: u32,
+    status: UpgradeStatus,
+}
+
+impl ReportedUpgrade {
+    /// Records a network upgrade as reported by the backing full node.
+    ///
+    /// The `activation_height` is ignored when `status` is [`UpgradeStatus::Disabled`],
+    /// since a disabled upgrade never activates.
+    pub fn new(
+        branch_id: u32,
+        name: String,
+        activation_height: u32,
+        status: UpgradeStatus,
+    ) -> Self {
+        Self {
+            branch_id,
+            name,
+            activation_height,
+            status,
+        }
+    }
+
     /// The consensus branch ID the node reports for this upgrade.
-    pub branch_id: u32,
+    pub fn branch_id(&self) -> u32 {
+        self.branch_id
+    }
+
     /// The node’s name for the upgrade, used for diagnostics only.
-    pub name: String,
-    /// The activation height the node reports. Ignored when the status is
-    /// [`UpgradeStatus::Disabled`], since a disabled upgrade never activates.
-    pub activation_height: u32,
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The activation height the node reports.
+    pub fn activation_height(&self) -> u32 {
+        self.activation_height
+    }
+
     /// Whether the node treats the upgrade as active, pending, or disabled.
-    pub status: UpgradeStatus,
+    pub fn status(&self) -> UpgradeStatus {
+        self.status
+    }
 }
 
 /// A way in which the backing full node’s consensus rules are incompatible with this
@@ -337,7 +367,7 @@ fn branch_incompatibility<P: consensus::Parameters>(
     }
 }
 
-/// What [`check_consensus_compatibility`] should do about the detected incompatibilities,
+/// What `check_consensus_compatibility` should do about the detected incompatibilities,
 /// given the node’s current tip. There is no “compatible” variant: [`classify`] is only
 /// reached once at least one incompatibility exists, so compatibility is handled by its
 /// caller before classification.
@@ -537,10 +567,25 @@ pub trait ChainView: Clone + Send + Sync + 'static {
 /// A block's height and hash.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChainBlock {
+    height: BlockHeight,
+    hash: BlockHash,
+}
+
+impl ChainBlock {
+    /// Pairs a block's height with its hash.
+    pub fn new(height: BlockHeight, hash: BlockHash) -> Self {
+        Self { height, hash }
+    }
+
     /// The block's height.
-    pub height: BlockHeight,
+    pub fn height(&self) -> BlockHeight {
+        self.height
+    }
+
     /// The block's hash.
-    pub hash: BlockHash,
+    pub fn hash(&self) -> BlockHash {
+        self.hash
+    }
 }
 
 /// An ordered list of a caller's own block hashes, highest chain height first, used to
@@ -585,16 +630,64 @@ impl BlockLocator {
 
 /// A transaction together with the chain metadata the wallet needs to ingest it.
 pub struct ChainTx {
+    inner: Transaction,
+    raw: Vec<u8>,
+    block_hash: Option<BlockHash>,
+    mined_height: Option<BlockHeight>,
+    block_time: Option<u32>,
+}
+
+impl ChainTx {
+    /// Combines a transaction with the chain metadata a backend knows about it.
+    ///
+    /// The metadata options are deliberately independent, reflecting the three states a
+    /// backend reports: mined in the best chain (all `Some`), mined in a side chain
+    /// (`block_hash` alone may be `Some`), or in the mempool (all `None`).
+    pub fn new(
+        inner: Transaction,
+        raw: Vec<u8>,
+        block_hash: Option<BlockHash>,
+        mined_height: Option<BlockHeight>,
+        block_time: Option<u32>,
+    ) -> Self {
+        Self {
+            inner,
+            raw,
+            block_hash,
+            mined_height,
+            block_time,
+        }
+    }
+
     /// The parsed transaction.
-    pub inner: Transaction,
+    pub fn inner(&self) -> &Transaction {
+        &self.inner
+    }
+
     /// The transaction's raw serialized bytes.
-    pub raw: Vec<u8>,
+    pub fn raw(&self) -> &[u8] {
+        &self.raw
+    }
+
     /// The hash of the block containing the transaction, if mined.
-    pub block_hash: Option<BlockHash>,
+    pub fn block_hash(&self) -> Option<BlockHash> {
+        self.block_hash
+    }
+
     /// The height of the block containing the transaction, if mined.
-    pub mined_height: Option<BlockHeight>,
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
+    }
+
     /// The timestamp of the block containing the transaction, if mined.
-    pub block_time: Option<u32>,
+    pub fn block_time(&self) -> Option<u32> {
+        self.block_time
+    }
+
+    /// Splits the transaction from its raw bytes, for consumers that need ownership.
+    pub fn into_parts(self) -> (Transaction, Vec<u8>) {
+        (self.inner, self.raw)
+    }
 }
 
 /// The spend status of a transparent output, as reported by [`ChainView::outpoint_spend_status`].
@@ -1038,7 +1131,7 @@ mod tests {
     }
 
     /// A minimal [`Chain`] that serves a fixed upgrade set and tip on mainnet, for exercising
-    /// the end-to-end [`check_consensus_compatibility`] orchestration. Only `params`,
+    /// the end-to-end `check_consensus_compatibility` orchestration. Only `params`,
     /// `reported_upgrades`, and `snapshot` carry meaning; the compatibility check never reaches
     /// the other methods, so they are `unreachable!`.
     #[derive(Clone)]

@@ -506,7 +506,7 @@ pub(crate) async fn call<C: Chain>(
     let in_active_chain = match requested_block {
         None => None,
         Some(requested) => {
-            if tx.block_hash != Some(requested) {
+            if tx.block_hash() != Some(requested) {
                 return Err(LegacyCode::InvalidAddressOrKey
                     .with_static("No such transaction found in the provided block"));
             }
@@ -514,7 +514,7 @@ pub(crate) async fn call<C: Chain>(
             // The requested block is in the active chain iff it is the canonical block at
             // the transaction's mined height.
             let mined_height = tx
-                .mined_height
+                .mined_height()
                 .expect("a transaction with a block hash has a mined height");
             let canonical = chain_view
                 .get_block_header(mined_height)
@@ -525,24 +525,24 @@ pub(crate) async fn call<C: Chain>(
         }
     };
 
-    let blockhash = tx.block_hash.map(|hash| hash.to_string());
+    let blockhash = tx.block_hash().map(|hash| hash.to_string());
     let height = tx
-        .mined_height
+        .mined_height()
         .and_then(|h| i32::try_from(u32::from(h)).ok());
     let chain_tip = chain_view
         .tip()
         .await
         .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?;
-    let confirmations = tx.mined_height.map(|h| chain_tip.height + 1 - h);
-    let blocktime = tx.block_time.map(i64::from);
+    let confirmations = tx.mined_height().map(|h| chain_tip.height() + 1 - h);
+    let blocktime = tx.block_time().map(i64::from);
 
-    let tx_hex = hex::encode(&tx.raw);
+    let tx_hex = hex::encode(tx.raw());
     if !verbose {
         return Ok(ResultType::Concise(tx_hex));
     }
 
-    let size = tx.raw.len() as u64;
-    let tx = tx.inner;
+    let size = tx.raw().len() as u64;
+    let (tx, _) = tx.into_parts();
 
     Ok(ResultType::Verbose(Box::new(Transaction {
         in_active_chain,

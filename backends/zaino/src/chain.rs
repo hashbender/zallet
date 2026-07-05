@@ -39,14 +39,14 @@ use zcash_protocol::{
 use zebra_rpc::client::{GetAddressBalanceRequest, GetAddressTxIdsRequest};
 use zebra_rpc::methods::NetworkUpgradeStatus;
 
-use crate::{
+use zallet_core::{
     components::TaskHandle,
     config::ZalletConfig,
     error::{Error, ErrorKind},
     network::Network,
 };
 
-use super::{
+use zallet_core::components::chain::{
     BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView, ReportedUpgrade,
     UpgradeStatus,
 };
@@ -67,6 +67,35 @@ fn block_fetch_error(
         ChainError::Unavailable(e)
     } else {
         ChainError::Backend(e)
+    }
+}
+
+/// Converts the wallet's network parameters into Zaino's network type.
+fn network_to_zaino(network: Network) -> zaino_common::Network {
+    use zcash_protocol::consensus;
+    match network {
+        Network::Consensus(network) => match network {
+            consensus::Network::MainNetwork => zaino_common::Network::Mainnet,
+            consensus::Network::TestNetwork => zaino_common::Network::Testnet,
+        },
+        // TODO: This does not create a compatible regtest network because Zebra does
+        // not have the necessary flexibility.
+        Network::RegTest(local_network) => {
+            zaino_common::Network::Regtest(zaino_common::network::ActivationHeights {
+                before_overwinter: Some(1),
+                overwinter: local_network.overwinter.map(|h| h.into()),
+                sapling: local_network.sapling.map(|h| h.into()),
+                blossom: local_network.blossom.map(|h| h.into()),
+                heartwood: local_network.heartwood.map(|h| h.into()),
+                canopy: local_network.canopy.map(|h| h.into()),
+                nu5: local_network.nu5.map(|h| h.into()),
+                nu6: local_network.nu6.map(|h| h.into()),
+                nu6_1: local_network.nu6_1.map(|h| h.into()),
+                nu6_2: local_network.nu6_2.map(|h| h.into()),
+                nu6_3: local_network.nu6_3.map(|h| h.into()),
+                nu7: None,
+            })
+        }
     }
 }
 
@@ -185,7 +214,7 @@ impl ZainoChain {
                 },
             },
             ZAINO_FINALISED_DB_VERSION,
-            params.to_zaino(),
+            network_to_zaino(params),
             // Run the finalised state ephemerally: no persistent database, finalised
             // reads are served from the backing validator.
             true,
@@ -213,7 +242,7 @@ impl ZainoChain {
                 let source = ValidatorConnector::State(State {
                     read_state_service,
                     mempool_fetcher: fetcher.clone(),
-                    network: params.to_zaino(),
+                    network: network_to_zaino(params),
                 });
                 (source, Some(AbortOnDrop::new(sync_task)))
             }
@@ -232,7 +261,7 @@ impl ZainoChain {
         };
 
         // Spawn a task that stops the indexer when appropriate internal signals occur.
-        let task = crate::spawn!("Indexer shutdown", async move {
+        let task = zallet_core::spawn!("Indexer shutdown", async move {
             // Hold the read-state syncer for the lifetime of this task. Dropping the guard
             // aborts the syncer on every shutdown path, including when this task is itself
             // aborted externally, so the syncer never outlives the indexer.
@@ -269,13 +298,14 @@ impl ZainoChain {
 /// The single place the Zaino connector’s status enum is mapped onto the backend-neutral
 /// [`UpgradeStatus`]. The `zebra` backend deserializes into `UpgradeStatus` directly, so this
 /// is the only status conversion in the tree.
-impl From<NetworkUpgradeStatus> for UpgradeStatus {
-    fn from(status: NetworkUpgradeStatus) -> Self {
-        match status {
-            NetworkUpgradeStatus::Active => UpgradeStatus::Active,
-            NetworkUpgradeStatus::Pending => UpgradeStatus::Pending,
-            NetworkUpgradeStatus::Disabled => UpgradeStatus::Disabled,
-        }
+///
+/// A plain function rather than a `From` impl: both types are foreign to this crate, so
+/// the orphan rule forbids the impl.
+fn upgrade_status(status: NetworkUpgradeStatus) -> UpgradeStatus {
+    match status {
+        NetworkUpgradeStatus::Active => UpgradeStatus::Active,
+        NetworkUpgradeStatus::Pending => UpgradeStatus::Pending,
+        NetworkUpgradeStatus::Disabled => UpgradeStatus::Disabled,
     }
 }
 
@@ -310,12 +340,12 @@ impl Chain for ZainoChain {
             .iter()
             .map(|(branch, info)| {
                 let (name, activation_height, status) = (*info).into_parts();
-                ReportedUpgrade {
-                    branch_id: branch.inner(),
-                    name: name.to_string(),
-                    activation_height: activation_height.0,
-                    status: status.into(),
-                }
+                ReportedUpgrade::new(
+                    branch.inner(),
+                    name.to_string(),
+                    activation_height.0,
+                    upgrade_status(status),
+                )
             })
             .collect())
     }
@@ -403,7 +433,7 @@ impl ChainView for ZainoChainView {
             .await
             .map_err(ChainError::backend)?;
 
-        Ok(ChainBlock::from_zaino((best_tip.hash, best_tip.height)))
+        Ok(chain_block_from_zaino((best_tip.hash, best_tip.height)))
     }
 
     async fn find_fork_point(
@@ -417,7 +447,7 @@ impl ChainView for ZainoChainView {
                 .await
                 .map_err(ChainError::backend)?
             {
-                return Ok(Some(ChainBlock::from_zaino(fork)));
+                return Ok(Some(chain_block_from_zaino(fork)));
             }
         }
         Ok(None)
@@ -505,7 +535,7 @@ impl ChainView for ZainoChainView {
     }
 
     async fn get_mempool_stream(&self) -> Result<Option<BoxStream<'_, Transaction>>, ChainError> {
-        let mempool_height = self.tip().await?.height + 1;
+        let mempool_height = self.tip().await?.height() + 1;
         let consensus_branch_id = consensus::BranchId::for_height(&self.params, mempool_height);
 
         Ok(self
@@ -552,7 +582,7 @@ impl ChainView for ZainoChainView {
                     // correct parsing target. This matches the fallback used by
                     // `get_mempool_stream`.
                     None => {
-                        let mempool_height = self.tip().await?.height + 1;
+                        let mempool_height = self.tip().await?.height() + 1;
                         consensus::BranchId::for_height(&self.params, mempool_height)
                     }
                 };
@@ -597,13 +627,13 @@ impl ChainView for ZainoChainView {
             _ => None,
         };
 
-        Ok(Some(ChainTx {
+        Ok(Some(ChainTx::new(
             inner,
             raw,
             block_hash,
             mined_height,
             block_time,
-        }))
+        )))
     }
 
     async fn get_transaction_status(&self, txid: TxId) -> Result<TransactionStatus, ChainError> {
@@ -733,13 +763,11 @@ impl ZainoChainView {
     }
 }
 
-impl ChainBlock {
-    fn from_zaino((hash, height): (zaino_state::BlockHash, zaino_state::Height)) -> Self {
-        Self {
-            height: BlockHeight::from_u32(height.into()),
-            hash: BlockHash(hash.0),
-        }
-    }
+/// Builds a [`ChainBlock`] from Zaino's (hash, height) pair.
+fn chain_block_from_zaino(
+    (hash, height): (zaino_state::BlockHash, zaino_state::Height),
+) -> ChainBlock {
+    ChainBlock::new(BlockHeight::from_u32(height.into()), BlockHash(hash.0))
 }
 
 #[cfg(test)]
