@@ -1,5 +1,5 @@
 [workspace]
-members = ["zallet-core", "zallet"]
+members = ["zallet-core", "zallet", "tools/gen-copyright"]
 exclude = ["backends", "crates"]
 resolver = "2"
 
@@ -55,7 +55,9 @@ rust-embed = "8"
 # Packaging
 clap_complete = "4"
 clap_mangen = "0.2"
+cargo_metadata = "0.18"
 embed-licensing = "0.3"
+embed-licensing-core = "0.3"
 flate2 = "1"
 spdx = "0.10"
 
