@@ -14,7 +14,7 @@ use zebra_chain::subtree::NoteCommitmentSubtreeIndex;
 use zebra_state::Spend;
 use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadStateService};
 
-use super::super::{BlockLocator, ChainBlock, ChainError};
+use zallet_core::components::chain::{BlockLocator, ChainBlock, ChainError};
 use super::convert;
 
 /// The header data the height→hash resolve walk needs.

@@ -168,17 +168,36 @@ pub fn boot(
 
 #[cfg(test)]
 mod tests {
+    use futures::future::BoxFuture;
+
+    use crate::components::chain::ChainRuntime;
+    use crate::error::Error;
+
+    /// A backend-independent no-op runtime, standing in for a backend crate's factory.
+    struct NoopRuntime;
+
+    impl ChainRuntime for NoopRuntime {
+        fn run_start(&self) -> BoxFuture<'_, Result<(), Error>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        #[cfg(all(zallet_build = "wallet", feature = "zcashd-import"))]
+        #[allow(private_interfaces)]
+        fn run_migrate_zcashd_wallet<'a>(
+            &'a self,
+            _cmd: &'a crate::cli::MigrateZcashdWalletCmd,
+        ) -> BoxFuture<'a, Result<(), Error>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
     /// Registration hands back the registered backend through `chain_runtime`.
     ///
     /// (A full boot isn't runnable in a unit test; registration is the part this
     /// module owns.)
     #[test]
     fn chain_runtime_registration() {
-        #[cfg(feature = "zaino")]
-        let backend: &'static dyn super::ChainRuntime = &crate::components::chain::ZainoBackend;
-        #[cfg(feature = "zebra-state")]
-        let backend: &'static dyn super::ChainRuntime = &crate::components::chain::ZebraBackend;
-        let _ = super::CHAIN_RUNTIME.set(backend);
+        let _ = super::CHAIN_RUNTIME.set(&NoopRuntime);
         // Must not panic:
         let _rt = super::chain_runtime();
     }

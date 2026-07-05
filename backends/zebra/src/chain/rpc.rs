@@ -12,8 +12,8 @@ use jsonrpsee::core::{client::ClientT, params::ArrayParams};
 use jsonrpsee_http_client::{HeaderMap, HeaderValue, HttpClient, HttpClientBuilder};
 use serde::Deserialize;
 
-use crate::components::chain::UpgradeStatus;
-use crate::error::{Error, ErrorKind};
+use zallet_core::components::chain::UpgradeStatus;
+use zallet_core::error::{Error, ErrorKind};
 
 /// The subset of `getblockchaininfo` we consume: the network-upgrade table, keyed by
 /// consensus branch ID (as an eight-digit hex string).

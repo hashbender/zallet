@@ -29,11 +29,11 @@ use zcash_protocol::{
 use zebra_state::ReadStateService;
 
 #[cfg(feature = "spend-index")]
-use super::SpendStatus;
-use super::{
+use zallet_core::components::chain::SpendStatus;
+use zallet_core::components::chain::{
     BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView, ReportedUpgrade,
 };
-use crate::{
+use zallet_core::{
     components::TaskHandle,
     config::ZalletConfig,
     error::{Error, ErrorKind},
@@ -121,7 +121,7 @@ impl ZebraChain {
         // `ZebraChain` clone drops). This task exists to match the backend lifecycle
         // shape; it runs until aborted on shutdown.
         // TODO: signal syncer failure through this task once the syncer exposes it.
-        let task = crate::spawn!("Zebra read-state syncer", async move {
+        let task = zallet_core::spawn!("Zebra read-state syncer", async move {
             std::future::pending::<()>().await;
             Ok::<(), Error>(())
         });

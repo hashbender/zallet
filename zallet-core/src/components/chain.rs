@@ -43,11 +43,6 @@ mod zaino;
 #[cfg(feature = "zaino")]
 pub use zaino::ZainoBackend;
 
-#[cfg(feature = "zebra-state")]
-mod zebra;
-#[cfg(feature = "zebra-state")]
-pub use zebra::ZebraBackend;
-
 /// A capability for constructing the process's chain backend.
 ///
 /// Implemented by a unit struct in each backend module. The selected factory is
@@ -153,7 +148,7 @@ pub trait Chain: Clone + Send + Sync + 'static {
 /// the lowercase status string the node reports (`"active"`, `"pending"`, `"disabled"`).
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum UpgradeStatus {
+pub enum UpgradeStatus {
     /// The upgrade has activated on the node’s chain.
     Active,
     /// The upgrade is scheduled but has not yet activated.
@@ -167,16 +162,16 @@ pub(crate) enum UpgradeStatus {
 /// Each [`Chain`] backend converts its own representation into this so that the
 /// consensus-compatibility check ([`check_consensus_compatibility`]) is backend-neutral.
 #[derive(Clone)]
-pub(crate) struct ReportedUpgrade {
+pub struct ReportedUpgrade {
     /// The consensus branch ID the node reports for this upgrade.
-    branch_id: u32,
+    pub branch_id: u32,
     /// The node’s name for the upgrade, used for diagnostics only.
-    name: String,
+    pub name: String,
     /// The activation height the node reports. Ignored when the status is
     /// [`UpgradeStatus::Disabled`], since a disabled upgrade never activates.
-    activation_height: u32,
+    pub activation_height: u32,
     /// Whether the node treats the upgrade as active, pending, or disabled.
-    status: UpgradeStatus,
+    pub status: UpgradeStatus,
 }
 
 /// A way in which the backing full node’s consensus rules are incompatible with this
