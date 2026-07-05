@@ -21,7 +21,7 @@ jobs:
 
         include:
           - target: Linux
-            os: ubuntu-latest
+            os: tenki-standard-medium-4c-8g
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
@@ -116,12 +116,12 @@ jobs:
 
           - target: Linux
             state: NU7
-            os: ubuntu-latest
+            os: tenki-standard-medium-4c-8g
             rustflags: '--cfg zcash_unstable="nu7"'
 
           - target: Linux
             state: merchant_terminal
-            os: ubuntu-latest
+            os: tenki-standard-medium-4c-8g
             rustflags: '--cfg zallet_build="merchant_terminal"'
 
         exclude:
@@ -157,7 +157,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
+        os: [tenki-standard-medium-4c-8g, windows-latest, macOS-latest]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -199,8 +199,9 @@ jobs:
         run: git diff --exit-code -- ':!Cargo.lock' ':!backends/zebra/Cargo.lock' ':!backends/zaino/Cargo.lock'
 
   trigger-integration:
+    if: ${{ github.repository == 'zcash/zallet' }}
     name: Trigger integration tests
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - name: Generate app token
         id: app-token
@@ -237,7 +238,7 @@ jobs:
       - test-msrv-required
       - build-latest
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - name: Determine whether all required-pass steps succeeded
         run: |
