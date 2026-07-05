@@ -22,6 +22,29 @@ use {
     zip32::fingerprint::SeedFingerprint,
 };
 
+/// The chain backends a Zallet deployment can use.
+///
+/// Serialized in config files as the top-level `backend` key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ChainBackendKind {
+    /// The `zebra-state` backend: reads finalized chain state directly from a
+    /// co-located zebrad's state database. The default.
+    ZebraState,
+    /// The Zaino-backed backend: embeds the Zaino chain index, following a validator
+    /// over JSON-RPC.
+    Zaino,
+}
+
+impl std::fmt::Display for ChainBackendKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::ZebraState => "zebra-state",
+            Self::Zaino => "zaino",
+        })
+    }
+}
+
 /// Zallet Configuration
 ///
 /// Most fields are `Option<T>` to enable distinguishing between a user relying on a
@@ -39,6 +62,26 @@ pub struct ZalletConfig {
     /// is set to `None` until `EntryPoint::process_config` is called.
     #[serde(skip)]
     pub(crate) datadir: Option<PathBuf>,
+
+    /// Whether this configuration was read from a config file, as opposed to being the
+    /// implicit default configuration used when no config file exists.
+    ///
+    /// This cannot be set in a config file; it is `false` until
+    /// `EntryPoint::process_config` is called. Backend validation only applies to
+    /// configurations that were actually loaded from a file.
+    #[serde(skip)]
+    pub(crate) loaded_from_file: bool,
+
+    /// The chain backend this wallet installation uses.
+    ///
+    /// The `zallet` launcher reads this key to decide which backend binary to run
+    /// (`zallet-zebra-state` or `zallet-zaino`), and each backend binary refuses to
+    /// run against a config that names a different backend, since both operate on the
+    /// same wallet database.
+    ///
+    /// If unset, the default backend (`"zebra-state"`) is assumed; backend binaries
+    /// other than the default require this key to be set.
+    pub backend: Option<ChainBackendKind>,
 
     /// Settings that affect transactions created by Zallet.
     pub builder: BuilderSection,
@@ -732,6 +775,7 @@ impl ZalletConfig {
         // make changes to the config structure.
         let conf = ZalletConfig::default();
         let field_defaults = [
+            top_level("backend", ChainBackendKind::ZebraState),
             builder(
                 "spend_zeroconf_change",
                 conf.builder.spend_zeroconf_change(),
@@ -786,6 +830,8 @@ impl ZalletConfig {
         .collect::<HashMap<_, _>>();
 
         // The glue that makes the above easy to maintain:
+        const TOP_LEVEL: &str = "";
+        const BACKEND: &str = "backend";
         const BUILDER: &str = "builder";
         const BUILDER_LIMITS: &str = "builder.limits";
         const CONSENSUS: &str = "consensus";
@@ -803,6 +849,12 @@ impl ZalletConfig {
         const RPC: &str = "rpc";
         const RPC_AUTH: &str = "rpc.auth";
         const SYNC: &str = "sync";
+        fn top_level<T: Serialize>(
+            f: &'static str,
+            d: T,
+        ) -> ((&'static str, &'static str), Option<toml::Value>) {
+            field(TOP_LEVEL, f, d)
+        }
         fn builder<T: Serialize>(
             f: &'static str,
             d: T,
@@ -1071,6 +1123,14 @@ impl ZalletConfig {
 
         for field_name in Self::FIELD_NAMES {
             match *field_name {
+                // `backend` is the sole top-level *file-configurable* key; it must be
+                // emitted before any `[section]` header to remain a top-level TOML key.
+                BACKEND => write_field::<Self>(
+                    &mut config,
+                    field_name,
+                    false,
+                    sec_def(TOP_LEVEL, field_name),
+                ),
                 BUILDER => write_section::<BuilderSection>(&mut config, field_name, &sec_def),
                 CONSENSUS => write_section::<ConsensusSection>(&mut config, field_name, &sec_def),
                 DATABASE => write_section::<DatabaseSection>(&mut config, field_name, &sec_def),
@@ -1097,6 +1157,30 @@ impl ZalletConfig {
 
 #[cfg(test)]
 mod tests {
+    use super::ChainBackendKind;
+
+    #[test]
+    fn backend_key_parses() {
+        /// Stands in for `ZalletConfig`, which cannot be deserialized piecemeal (all
+        /// sections are required fields).
+        #[derive(serde::Deserialize)]
+        struct TopLevel {
+            backend: Option<ChainBackendKind>,
+        }
+
+        let config: TopLevel = toml::from_str("").unwrap();
+        assert_eq!(config.backend, None);
+
+        let config: TopLevel = toml::from_str("backend = \"zebra-state\"").unwrap();
+        assert_eq!(config.backend, Some(ChainBackendKind::ZebraState));
+
+        let config: TopLevel = toml::from_str("backend = \"zaino\"").unwrap();
+        assert_eq!(config.backend, Some(ChainBackendKind::Zaino));
+
+        // Unknown values are rejected with a parse error, not silently defaulted.
+        assert!(toml::from_str::<TopLevel>("backend = \"bitcoind\"").is_err());
+    }
+
     use super::ReadStateServiceSection;
 
     #[test]

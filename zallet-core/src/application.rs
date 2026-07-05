@@ -17,7 +17,7 @@ use i18n_embed::unic_langid::LanguageIdentifier;
 use crate::{
     cli::EntryPoint,
     components::{chain::ChainRuntime, tracing::Tracing},
-    config::ZalletConfig,
+    config::{ChainBackendKind, ZalletConfig},
     fl, i18n,
 };
 
@@ -141,6 +141,37 @@ impl Application for ZalletApp {
     }
 
     fn after_config(&mut self, config: Self::Cfg) -> Result<(), FrameworkError> {
+        // Both backend binaries operate on the same wallet database, so refuse to run
+        // against a config file that names a different backend than this binary
+        // provides. The `zallet` launcher uses the same key to pick the binary to run,
+        // making a mismatch reachable only by invoking a backend binary directly. When
+        // no config file exists there is nothing to mismatch against, and commands that
+        // work without one (e.g. `example-config`) must keep working for every backend.
+        if config.loaded_from_file {
+            let provided = chain_runtime().backend_kind();
+            match config.backend {
+                Some(configured) if configured == provided => (),
+                None if provided == ChainBackendKind::ZebraState => (),
+                Some(configured) => {
+                    return Err(FrameworkErrorKind::ConfigError
+                        .context(fl!(
+                            "err-config-backend-mismatch",
+                            configured = configured.to_string(),
+                            provided = provided.to_string(),
+                        ))
+                        .into());
+                }
+                None => {
+                    return Err(FrameworkErrorKind::ConfigError
+                        .context(fl!(
+                            "err-config-backend-unset",
+                            provided = provided.to_string(),
+                        ))
+                        .into());
+                }
+            }
+        }
+
         // Configure components
         let mut components = self.state.components_mut();
         components.after_config(&config)?;
@@ -177,6 +208,10 @@ mod tests {
     struct NoopRuntime;
 
     impl ChainRuntime for NoopRuntime {
+        fn backend_kind(&self) -> crate::config::ChainBackendKind {
+            crate::config::ChainBackendKind::ZebraState
+        }
+
         fn run_start(&self) -> BoxFuture<'_, Result<(), Error>> {
             Box::pin(async { Ok(()) })
         }
