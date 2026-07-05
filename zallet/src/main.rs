@@ -194,12 +194,12 @@ fn select_backend(args: &[OsString], home_dir: Option<&Path>) -> Result<Backend,
 /// Locates the backend binary: next to this launcher first, then via `$PATH`.
 fn locate_backend_binary(backend: Backend) -> OsString {
     let name = format!("{}{}", backend.binary_name(), env::consts::EXE_SUFFIX);
-    if let Ok(exe) = env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let sibling = dir.join(&name);
-            if sibling.exists() {
-                return sibling.into();
-            }
+    if let Ok(exe) = env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let sibling = dir.join(&name);
+        if sibling.exists() {
+            return sibling.into();
         }
     }
     name.into()
