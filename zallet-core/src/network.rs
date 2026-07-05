@@ -93,24 +93,6 @@ impl Network {
             }
         }
     }
-
-    /// Converts this network into the corresponding `zebra-chain` network.
-    ///
-    /// Returns an error for regtest, which the read-state-service backend does not
-    /// support.
-    #[cfg(any(feature = "zaino", feature = "zebra-state"))]
-    pub(crate) fn to_zebra(self) -> Result<zebra_chain::parameters::Network, &'static str> {
-        use zebra_chain::parameters::Network as ZebraNetwork;
-        match self {
-            Network::Consensus(consensus::Network::MainNetwork) => Ok(ZebraNetwork::Mainnet),
-            Network::Consensus(consensus::Network::TestNetwork) => {
-                Ok(ZebraNetwork::new_default_testnet())
-            }
-            Network::RegTest(_) => {
-                Err("the read-state-service indexer backend does not support regtest")
-            }
-        }
-    }
 }
 
 impl consensus::Parameters for Network {
@@ -168,28 +150,6 @@ impl From<RegTestNuParam> for String {
             u32::from(nuparam.consensus_branch_id),
             nuparam.activation_height
         )
-    }
-}
-
-#[cfg(all(test, feature = "zebra-state"))]
-mod tests {
-    use super::*;
-    use zcash_protocol::consensus::NetworkType;
-    use zebra_chain::parameters::Network as ZebraNetwork;
-
-    #[test]
-    fn to_zebra_maps_main_and_test() {
-        let main = Network::from_type(NetworkType::Main, &[]);
-        assert!(matches!(main.to_zebra(), Ok(ZebraNetwork::Mainnet)));
-
-        let test = Network::from_type(NetworkType::Test, &[]);
-        assert!(matches!(test.to_zebra(), Ok(ZebraNetwork::Testnet(_))));
-    }
-
-    #[test]
-    fn to_zebra_rejects_regtest() {
-        let regtest = Network::from_type(NetworkType::Regtest, &[]);
-        assert!(regtest.to_zebra().is_err());
     }
 }
 
