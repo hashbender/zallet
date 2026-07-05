@@ -16,10 +16,9 @@ pub enum Network {
 }
 
 impl Network {
-    pub(crate) fn from_type(
-        network_type: consensus::NetworkType,
-        nuparams: &[RegTestNuParam],
-    ) -> Self {
+    /// Constructs the network parameters for the given network type, using the
+    /// provided network-upgrade parameters for regtest.
+    pub fn from_type(network_type: consensus::NetworkType, nuparams: &[RegTestNuParam]) -> Self {
         match network_type {
             consensus::NetworkType::Main => Self::Consensus(consensus::Network::MainNetwork),
             consensus::NetworkType::Test => Self::Consensus(consensus::Network::TestNetwork),

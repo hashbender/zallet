@@ -7,8 +7,8 @@ use zcash_protocol::{
 };
 use zebra_chain::serialization::ZcashSerialize as _;
 
-use super::super::ChainError;
-use crate::network::Network;
+use zallet_core::components::chain::ChainError;
+use zallet_core::network::Network;
 
 /// `zebra-chain` block hash → wallet block hash (same byte order).
 pub(super) fn block_hash(h: zebra_chain::block::Hash) -> BlockHash {

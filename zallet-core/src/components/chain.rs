@@ -32,11 +32,6 @@ mod zaino;
 #[cfg(feature = "zaino")]
 pub use zaino::ZainoBackend;
 
-#[cfg(feature = "zebra-state")]
-mod zebra;
-#[cfg(feature = "zebra-state")]
-pub use zebra::ZebraBackend;
-
 /// A capability for constructing the process's chain backend.
 ///
 /// Implemented by a unit struct in each backend module. The selected factory is

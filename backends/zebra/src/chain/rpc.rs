@@ -10,7 +10,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use jsonrpsee::core::{client::ClientT, params::ArrayParams};
 use jsonrpsee_http_client::{HeaderMap, HeaderValue, HttpClient, HttpClientBuilder};
 
-use crate::error::{Error, ErrorKind};
+use zallet_core::error::{Error, ErrorKind};
 
 enum Auth {
     /// Static Basic auth credentials (pre-encoded, never change).
