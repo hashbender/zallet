@@ -14,7 +14,8 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'zcash/zallet' }}
+    runs-on: tenki-standard-medium-4c-8g
     permissions:
       pages: write  # To push to a GitHub Pages site
       id-token: write # To update the deployment status

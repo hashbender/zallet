@@ -12,7 +12,7 @@ permissions:
 jobs:
   cargo-vet:
     name: Vet Rust dependencies
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -27,7 +27,7 @@ jobs:
 
   cargo-deny:
     name: Check licenses
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -42,7 +42,7 @@ jobs:
       - cargo-vet
       - cargo-deny
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - name: Determine whether all required-pass steps succeeded
         run: |

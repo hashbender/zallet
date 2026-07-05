@@ -89,7 +89,7 @@ concurrency:
 jobs:
   platform_matrix:
     name: Determine platform matrix
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     outputs:
       matrix: ${{ steps.compute.outputs.matrix }}
     steps:
@@ -149,7 +149,7 @@ jobs:
 
   binaries_deb_release:
     name: Build and deploy Zallet ${{ matrix.platform_key }} binaries and packages
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     needs: platform_matrix
 
     # Required permissions for Release upload + OIDC/Sigstore attestation
@@ -613,7 +613,7 @@ jobs:
   apt_publish:
     name: Publish multi-arch APT index
     needs: binaries_deb_release
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     permissions:
       contents: read
       id-token: write
@@ -714,7 +714,7 @@ jobs:
     name: Create/Update GitHub Release (aggregate)
     needs: binaries_deb_release
     if: ${{ startsWith(inputs.version, 'v') }}
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     permissions:
       contents: write
     env:
