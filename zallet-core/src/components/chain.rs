@@ -27,11 +27,6 @@ use crate::{components::TaskHandle, config::ZalletConfig, error::Error};
 mod error;
 pub use error::ChainError;
 
-#[cfg(feature = "zaino")]
-mod zaino;
-#[cfg(feature = "zaino")]
-pub use zaino::ZainoBackend;
-
 /// A capability for constructing the process's chain backend.
 ///
 /// Implemented by a unit struct in each backend module. The selected factory is

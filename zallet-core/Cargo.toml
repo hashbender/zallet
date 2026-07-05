@@ -66,10 +66,6 @@ transparent.workspace = true
 uuid.workspace = true
 which = { workspace = true, optional = true }
 xdg.workspace = true
-zaino-common = { workspace = true, optional = true }
-zallet-zebra-read-state = { path = "../crates/zebra-read-state", optional = true }
-zaino-fetch = { workspace = true, optional = true }
-zaino-state = { workspace = true, optional = true }
 zcash_address.workspace = true
 zcash_client_backend = { workspace = true, features = [
     "lightwalletd-tonic-tls-webpki-roots",
@@ -88,7 +84,6 @@ zcash_primitives.workspace = true
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zcash_script.workspace = true
-zebra-rpc = { workspace = true, optional = true }
 zip32.workspace = true
 zewif = { workspace = true, optional = true }
 zewif-zcashd = { workspace = true, optional = true }
@@ -121,19 +116,6 @@ trycmd.workspace = true
 
 [features]
 default = []
-
-## Zaino-backed chain-data backend.
-##
-## The backend can optionally read finalized state directly from a co-located zebrad's
-## `ReadStateService` when `[indexer.read_state_service]` is configured, instead of
-## fetching all chain data over JSON-RPC.
-zaino = [
-  "dep:zallet-zebra-read-state",
-  "dep:zaino-common",
-  "dep:zaino-fetch",
-  "dep:zaino-state",
-  "dep:zebra-rpc",
-]
 
 ## Enables per-outpoint transparent spend detection: the wallet emits
 ## `TransactionDataRequest::SpendsOfTransparentOutput` and the backend resolves spends via a

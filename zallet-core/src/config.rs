@@ -108,8 +108,7 @@ impl ZalletConfig {
     }
 
     /// Returns the path to the indexer's database.
-    #[cfg(feature = "zaino")]
-    pub(crate) fn indexer_db_path(&self) -> PathBuf {
+    pub fn indexer_db_path(&self) -> PathBuf {
         resolve_datadir_path(self.datadir(), self.indexer.db_path())
     }
 

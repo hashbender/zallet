@@ -38,14 +38,16 @@ use zcash_protocol::{
 #[cfg(not(feature = "spend-index"))]
 use zebra_rpc::client::{GetAddressBalanceRequest, GetAddressTxIdsRequest};
 
-use crate::{
+use zallet_core::{
     components::TaskHandle,
     config::ZalletConfig,
     error::{Error, ErrorKind},
     network::Network,
 };
 
-use super::{BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView};
+use zallet_core::components::chain::{
+    BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView,
+};
 use zallet_zebra_read_state::{AbortOnDrop, init_read_state_service, network_to_zebra};
 
 /// Classifies a block-fetch error, distinguishing transient reorg-window failures from
@@ -63,6 +65,35 @@ fn block_fetch_error(
         ChainError::Unavailable(e)
     } else {
         ChainError::Backend(e)
+    }
+}
+
+/// Converts the wallet's network parameters into Zaino's network type.
+fn network_to_zaino(network: Network) -> zaino_common::Network {
+    use zcash_protocol::consensus;
+    match network {
+        Network::Consensus(network) => match network {
+            consensus::Network::MainNetwork => zaino_common::Network::Mainnet,
+            consensus::Network::TestNetwork => zaino_common::Network::Testnet,
+        },
+        // TODO: This does not create a compatible regtest network because Zebra does
+        // not have the necessary flexibility.
+        Network::RegTest(local_network) => {
+            zaino_common::Network::Regtest(zaino_common::network::ActivationHeights {
+                before_overwinter: Some(1),
+                overwinter: local_network.overwinter.map(|h| h.into()),
+                sapling: local_network.sapling.map(|h| h.into()),
+                blossom: local_network.blossom.map(|h| h.into()),
+                heartwood: local_network.heartwood.map(|h| h.into()),
+                canopy: local_network.canopy.map(|h| h.into()),
+                nu5: local_network.nu5.map(|h| h.into()),
+                nu6: local_network.nu6.map(|h| h.into()),
+                nu6_1: local_network.nu6_1.map(|h| h.into()),
+                nu6_2: local_network.nu6_2.map(|h| h.into()),
+                nu6_3: local_network.nu6_3.map(|h| h.into()),
+                nu7: None,
+            })
+        }
     }
 }
 
@@ -181,7 +212,7 @@ impl ZainoChain {
                 },
             },
             ZAINO_FINALISED_DB_VERSION,
-            params.to_zaino(),
+            network_to_zaino(params),
             // Run the finalised state ephemerally: no persistent database, finalised
             // reads are served from the backing validator.
             true,
@@ -209,7 +240,7 @@ impl ZainoChain {
                 let source = ValidatorConnector::State(State {
                     read_state_service,
                     mempool_fetcher: fetcher.clone(),
-                    network: params.to_zaino(),
+                    network: network_to_zaino(params),
                 });
                 (source, Some(AbortOnDrop::new(sync_task)))
             }
@@ -228,7 +259,7 @@ impl ZainoChain {
         };
 
         // Spawn a task that stops the indexer when appropriate internal signals occur.
-        let task = crate::spawn!("Indexer shutdown", async move {
+        let task = zallet_core::spawn!("Indexer shutdown", async move {
             // Hold the read-state syncer for the lifetime of this task. Dropping the guard
             // aborts the syncer on every shutdown path, including when this task is itself
             // aborted externally, so the syncer never outlives the indexer.
@@ -360,7 +391,7 @@ impl ChainView for ZainoChainView {
             .await
             .map_err(ChainError::backend)?;
 
-        Ok(ChainBlock::from_zaino((best_tip.hash, best_tip.height)))
+        Ok(chain_block_from_zaino((best_tip.hash, best_tip.height)))
     }
 
     async fn find_fork_point(
@@ -374,7 +405,7 @@ impl ChainView for ZainoChainView {
                 .await
                 .map_err(ChainError::backend)?
             {
-                return Ok(Some(ChainBlock::from_zaino(fork)));
+                return Ok(Some(chain_block_from_zaino(fork)));
             }
         }
         Ok(None)
@@ -690,12 +721,13 @@ impl ZainoChainView {
     }
 }
 
-impl ChainBlock {
-    fn from_zaino((hash, height): (zaino_state::BlockHash, zaino_state::Height)) -> Self {
-        Self {
-            height: BlockHeight::from_u32(height.into()),
-            hash: BlockHash(hash.0),
-        }
+/// Builds a [`ChainBlock`] from Zaino's (hash, height) pair.
+fn chain_block_from_zaino(
+    (hash, height): (zaino_state::BlockHash, zaino_state::Height),
+) -> ChainBlock {
+    ChainBlock {
+        height: BlockHeight::from_u32(height.into()),
+        hash: BlockHash(hash.0),
     }
 }
 

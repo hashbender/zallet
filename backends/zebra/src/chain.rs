@@ -29,16 +29,18 @@ use zcash_protocol::{
 use zebra_state::ReadStateService;
 
 #[cfg(feature = "spend-index")]
+use transparent::bundle::OutPoint;
+#[cfg(feature = "spend-index")]
 use zallet_core::components::chain::SpendStatus;
-use zallet_core::components::chain::{BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView};
+use zallet_core::components::chain::{
+    BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView,
+};
 use zallet_core::{
     components::TaskHandle,
     config::ZalletConfig,
     error::{Error, ErrorKind},
     network::Network,
 };
-#[cfg(feature = "spend-index")]
-use transparent::bundle::OutPoint;
 use zallet_zebra_read_state::{AbortOnDrop, init_read_state_service, network_to_zebra};
 
 mod convert;
