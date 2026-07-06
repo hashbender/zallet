@@ -236,7 +236,7 @@ pub(crate) async fn call<C: Chain>(
             .shielded_inputs()
             .iter()
             .flat_map(|inputs| inputs.notes())
-            .filter(|note| note.note().protocol() == ShieldedPool::Orchard)
+            .filter(|note| note.note().pool() == ShieldedPool::Orchard)
             .count();
 
         let orchard_outputs = step

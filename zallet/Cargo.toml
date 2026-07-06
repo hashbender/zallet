@@ -108,6 +108,7 @@ abscissa_core.workspace = true
 abscissa_tokio.workspace = true
 age.workspace = true
 async-trait.workspace = true
+bech32 = { workspace = true, optional = true }
 base64ct.workspace = true
 bip0039.workspace = true
 clap = { workspace = true, features = ["string", "unstable-styles"] }
@@ -128,6 +129,7 @@ incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
 jsonrpsee = { workspace = true, features = ["macros", "server"] }
 known-folders.workspace = true
 nix = { workspace = true, features = ["signal"] }
+nonempty.workspace = true
 orchard.workspace = true
 phf.workspace = true
 rand.workspace = true
@@ -214,6 +216,7 @@ once_cell.workspace = true
 proptest.workspace = true
 regex.workspace = true
 trycmd.workspace = true
+zebra-chain.workspace = true
 
 [features]
 default = ["zebra-state"]
@@ -277,11 +280,13 @@ transparent-key-import = [
 ## Allows `zallet` to import zcashd wallets.
 zcashd-import = [
   "transparent-key-import",
+  "dep:bech32",
   "dep:which",
   "dep:zewif",
   "dep:zewif-zcashd",
   "zcash_client_backend/zcashd-compat",
   "zcash_client_sqlite/zcashd-compat",
+  "zcash_client_sqlite/zewif",
 ]
 
 [lints.rust]

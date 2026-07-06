@@ -157,6 +157,26 @@ err-init-identity-not-usable = Identity file at {$path} is not usable: {$error}
 err-init-rpc-auth-invalid = Invalid '{-cfg-rpc-auth}' configuration
 err-config-file-not-found = Configuration file at {$path} does not exist.
 err-config-file-invalid = Failed to parse configuration file at {$path}: {$error}
+err-init-incompatible-consensus =
+    The backing full node follows consensus rules that this {-zallet} build cannot
+    interpret correctly, so {-zallet} cannot maintain a correct view of the chain.
+    Either the full node follows a network upgrade that this build does not recognize,
+    or it activates a recognized upgrade at a height that differs from what this build
+    expects.
+    Incompatible network upgrades: {$upgrades}.
+    Upgrade {-zallet} to a release whose consensus rules match the full node.
+warn-init-pending-incompatible-consensus =
+    The backing full node is scheduled to activate consensus rules that this {-zallet}
+    build cannot interpret correctly. {-zallet} will operate normally until the chain
+    reaches height {$height}, then shut down to avoid presenting an incorrect view of the
+    chain.
+    Pending incompatible network upgrades: {$upgrades}.
+    Upgrade {-zallet} to a release whose consensus rules match the full node before then.
+warn-init-consensus-divergence-reached =
+    The chain has reached height {$height}, where the backing full node's consensus rules
+    diverge from what this {-zallet} build can interpret. Shutting down to avoid an
+    incorrect view of the chain. Upgrade {-zallet} to a release whose consensus rules match
+    the full node.
 
 ## Keystore errors
 
@@ -242,6 +262,33 @@ err-migrate-wallet-invalid-account-id =
 err-migrate-wallet-all-unmined =
     All transactions in the wallet are unmined; cannot determine effective
     consensus branch ID for pre-v5 transactions.
+err-migrate-secret-non-english-mnemonic =
+    The wallet contains a mnemonic seed phrase using a wordlist other than
+    English; only English mnemonics can be imported.
+err-migrate-secret-fingerprint-encoding =
+    The wallet records an invalid seed fingerprint '{$fingerprint}'.
+err-migrate-secret-fingerprint-mismatch =
+    A stored seed does not match the fingerprint '{$fingerprint}' it was
+    recorded under; the wallet data may be corrupt.
+err-migrate-secret-transparent-key-decoding =
+    The wallet contains a transparent secret key that is not a valid WIF
+    encoding for this network.
+err-migrate-secret-transparent-key-mismatch =
+    A transparent secret key does not correspond to the public key it was
+    recorded under; the wallet data may be corrupt.
+err-migrate-secret-sapling-key-decoding =
+    An error occurred decoding a Sapling spending key: '{$err}'.
+err-migrate-secret-sapling-key-mismatch =
+    A Sapling spending key does not correspond to the viewing key it was
+    recorded under; the wallet data may be corrupt.
+err-migrate-wallet-export =
+    An error occurred exporting the {-zcashd} wallet to a ZeWIF document: '{$err}'
+err-migrate-wallet-import =
+    An error occurred importing the ZeWIF document into the wallet database: '{$err}'
+err-migrate-wallet-secret-store =
+    An error occurred storing wallet secrets in the keystore: '{$err}'
+err-migrate-wallet-encrypted-secrets =
+    The ZeWIF document's secret material is encrypted; decrypt it before import.
 
 err-ux-A = Did {-zallet} not do what you expected? Could the error be more useful?
 err-ux-B = Tell us

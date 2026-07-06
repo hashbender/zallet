@@ -37,6 +37,7 @@ use zcash_protocol::{
 };
 #[cfg(not(feature = "spend-index"))]
 use zebra_rpc::client::{GetAddressBalanceRequest, GetAddressTxIdsRequest};
+use zebra_rpc::methods::NetworkUpgradeStatus;
 
 use crate::{
     components::TaskHandle,
@@ -46,7 +47,10 @@ use crate::{
 };
 
 use super::read_state::{AbortOnDrop, init_read_state_service};
-use super::{BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView};
+use super::{
+    BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView, ReportedUpgrade,
+    UpgradeStatus,
+};
 
 /// Classifies a block-fetch error, distinguishing transient reorg-window failures from
 /// genuine backend errors.
@@ -252,6 +256,19 @@ impl ZainoChain {
     }
 }
 
+/// The single place the Zaino connector’s status enum is mapped onto the backend-neutral
+/// [`UpgradeStatus`]. The `zebra` backend deserializes into `UpgradeStatus` directly, so this
+/// is the only status conversion in the tree.
+impl From<NetworkUpgradeStatus> for UpgradeStatus {
+    fn from(status: NetworkUpgradeStatus) -> Self {
+        match status {
+            NetworkUpgradeStatus::Active => UpgradeStatus::Active,
+            NetworkUpgradeStatus::Pending => UpgradeStatus::Pending,
+            NetworkUpgradeStatus::Disabled => UpgradeStatus::Disabled,
+        }
+    }
+}
+
 /// Factory for the `zaino` chain backend.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ZainoBackend;
@@ -266,6 +283,32 @@ impl ChainFactory for ZainoBackend {
 
 impl Chain for ZainoChain {
     type View = ZainoChainView;
+
+    fn params(&self) -> &Network {
+        &self.params
+    }
+
+    async fn reported_upgrades(&self) -> Result<Vec<ReportedUpgrade>, Error> {
+        let info = self
+            .fetcher
+            .get_blockchain_info()
+            .await
+            .map_err(|e| ErrorKind::Init.context(e))?;
+
+        Ok(info
+            .upgrades
+            .iter()
+            .map(|(branch, info)| {
+                let (name, activation_height, status) = (*info).into_parts();
+                ReportedUpgrade {
+                    branch_id: branch.inner(),
+                    name: name.to_string(),
+                    activation_height: activation_height.0,
+                    status: status.into(),
+                }
+            })
+            .collect())
+    }
 
     async fn broadcast_transaction(&self, tx: &Transaction) -> Result<(), ChainError> {
         let mut tx_bytes = vec![];
@@ -409,11 +452,31 @@ impl ChainView for ZainoChainView {
             }
             .to_frontier();
 
+            // Zaino's `get_treestate` does not yet expose the Ironwood note
+            // commitment tree (the pinned branch predates that API). Below the
+            // NU6.3 activation height the Ironwood tree is empty by definition;
+            // at or above it, returning an empty frontier would corrupt scan
+            // continuity, so surface the gap instead. Fix by extending zaino's
+            // treestate API when repointing the pin (see the workspace
+            // `Cargo.toml` note on the zaino pin).
+            let ironwood_active = consensus::Parameters::activation_height(
+                &self.params,
+                consensus::NetworkUpgrade::Nu6_3,
+            )
+            .is_some_and(|activation| height >= activation);
+            if ironwood_active {
+                return Err(ChainError::unavailable(
+                    "the zaino backend does not yet provide Ironwood tree state",
+                ));
+            }
+            let final_ironwood_tree = incrementalmerkletree::frontier::Frontier::empty();
+
             Some(ChainState::new(
                 height,
                 BlockHash(hash.0),
                 final_sapling_tree,
                 final_orchard_tree,
+                final_ironwood_tree,
             ))
         } else {
             None

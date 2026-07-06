@@ -31,7 +31,9 @@ use zebra_state::ReadStateService;
 #[cfg(feature = "spend-index")]
 use super::SpendStatus;
 use super::read_state::{AbortOnDrop, init_read_state_service};
-use super::{BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView};
+use super::{
+    BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView, ReportedUpgrade,
+};
 use crate::{
     components::TaskHandle,
     config::ZalletConfig,
@@ -131,6 +133,32 @@ impl ChainFactory for ZebraBackend {
 
 impl Chain for ZebraChain {
     type View = ZebraChainView<ReadStateChainReader>;
+
+    fn params(&self) -> &Network {
+        &self.params
+    }
+
+    async fn reported_upgrades(&self) -> Result<Vec<ReportedUpgrade>, Error> {
+        // The backing zebrad is a separate process that may follow newer consensus rules
+        // than this build of Zallet recognizes, so we ask it which upgrades it follows.
+        let info = self.validator_rpc.get_blockchain_info().await?;
+
+        info.upgrades
+            .into_iter()
+            .map(|(branch_id, upgrade)| {
+                let branch_id = u32::from_str_radix(&branch_id, 16).map_err(|e| {
+                    ErrorKind::Init
+                        .context(format!("invalid consensus branch ID {branch_id:?}: {e}"))
+                })?;
+                Ok(ReportedUpgrade {
+                    branch_id,
+                    name: upgrade.name,
+                    activation_height: upgrade.activation_height,
+                    status: upgrade.status,
+                })
+            })
+            .collect()
+    }
 
     async fn broadcast_transaction(&self, tx: &Transaction) -> Result<(), ChainError> {
         let mut tx_bytes = vec![];
@@ -314,11 +342,28 @@ impl<R: ChainReader> ChainView for ZebraChainView<R> {
         }
         .to_frontier();
 
+        let final_ironwood_tree = match self.reader.ironwood_tree_bytes(hash).await? {
+            Some(bytes) => read_commitment_tree::<
+                orchard::tree::MerkleHashOrchard,
+                _,
+                { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+            >(&bytes[..])
+            .map_err(ChainError::invalid_data)?,
+            None if pinned_finalized => CommitmentTree::empty(),
+            None => {
+                return Err(ChainError::unavailable(
+                    "pinned ironwood treestate reorged away",
+                ));
+            }
+        }
+        .to_frontier();
+
         Ok(Some(ChainState::new(
             height,
             hash,
             final_sapling_tree,
             final_orchard_tree,
+            final_ironwood_tree,
         )))
     }
 
@@ -597,6 +642,9 @@ mod tests {
             Ok(None)
         }
         async fn orchard_tree_bytes(&self, _: BlockHash) -> Result<Option<Vec<u8>>, ChainError> {
+            Ok(None)
+        }
+        async fn ironwood_tree_bytes(&self, _: BlockHash) -> Result<Option<Vec<u8>>, ChainError> {
             Ok(None)
         }
         async fn find_fork_point(

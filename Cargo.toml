@@ -19,6 +19,9 @@ async-trait = "0.1"
 futures = "0.3"
 tokio = "1"
 
+# Data structures
+nonempty = "0.11"
+
 # Build script
 shadow-rs = { version = "1.2", default-features = false }
 
@@ -41,6 +44,7 @@ sha2 = "0.10"
 
 # Key storage
 age = { version = "0.11", features = ["armor", "cli-common", "plugin"] }
+bech32 = "0.11"
 bip0039 = "0.12"
 
 # Localization
@@ -160,26 +164,27 @@ anyhow = "1.0"
 tonic = "0.14"
 
 [patch.crates-io]
-# Temporary pin to librustzcash/main.
-# This should point to a proper release on crates.io
-equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-f4jumble = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-pczt = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-transparent = { package = "zcash_transparent", git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-zcash_client_sqlite = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "cac64ba2b47545f23d356002e4a9f02aaaabc083" }
+# Temporary pin to the head of librustzcash PR #2547 (feat/zewif_import, which is
+# stacked on the Ironwood scan-model branch); re-point to zcash/librustzcash once
+# that PR merges, and to a proper release on crates.io once one exists.
+equihash = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+f4jumble = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+pczt = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+transparent = { package = "zcash_transparent", git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+zcash_address = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+zcash_client_backend = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+zcash_client_sqlite = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+zcash_encoding = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+zcash_history = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+zcash_keys = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+zcash_primitives = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+zcash_proofs = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
+zcash_protocol = { git = "https://github.com/nuttycom/librustzcash.git", rev = "cb7579b8274355d27e5423c11a415dbd710e268d" }
 
 age = { git = "https://github.com/str4d/rage.git", rev = "92f437bc2a061312fa6633bb70c91eef91142fd4" }
 
-zewif = { git = "https://github.com/zcash/zewif.git", rev = "0a5a234490a339ca8dda13614146e4769a3cd963" }
-zewif-zcashd = { git = "https://github.com/zcash/zewif-zcashd.git", rev = "c640713b91b79d153a7fee2888088931cd7e8326" }
+zewif = { git = "https://github.com/zcash/zewif.git", rev = "74f1a1694131386515e1733dfb9f414a6284555f" }
+zewif-zcashd = { git = "https://github.com/zcash/zewif-zcashd.git", rev = "190550ab8801da83c13b7d936676ce1c7c373d13" }
 
 # TEMPORARY: pin the zaino crates to zingolabs/zaino `feat/ironwood_nu6_3`
 # (currently e7c9dfdb891d45c18ba53d75f5a54a90d3ec627c), which updates zaino for
