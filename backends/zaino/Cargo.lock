@@ -7733,6 +7733,7 @@ dependencies = [
  "jsonrpsee-http-client",
  "known-folders",
  "nix 0.29.0",
+ "nonempty 0.11.0",
  "orchard 0.15.0-pre.2",
  "phf 0.12.1",
  "quote",
