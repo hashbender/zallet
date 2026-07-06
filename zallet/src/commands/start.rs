@@ -7,7 +7,7 @@ use crate::{
     cli::StartCmd,
     commands::AsyncRunnable,
     components::{
-        chain::{ChainBackend, check_consensus_compatibility},
+        chain::{ChainFactory, check_consensus_compatibility},
         database::Database,
         json_rpc::JsonRpc,
         sync::WalletSync,
@@ -21,8 +21,9 @@ use crate::{
 #[cfg(zallet_build = "wallet")]
 use crate::components::keystore::KeyStore;
 
-impl AsyncRunnable for StartCmd {
-    async fn run(&self) -> Result<(), Error> {
+impl StartCmd {
+    /// Runs `zallet start` against the chain backend produced by `factory`.
+    pub(crate) async fn run_with<F: ChainFactory>(factory: &F) -> Result<(), Error> {
         let config = APP.config();
         let _lock = config.lock_datadir()?;
 
@@ -53,7 +54,7 @@ impl AsyncRunnable for StartCmd {
         let keystore = KeyStore::new(&config, db.clone())?;
 
         // Start monitoring the chain.
-        let (chain, chain_indexer_task_handle) = ChainBackend::new(&config).await?;
+        let (chain, chain_indexer_task_handle) = factory.build(&config).await?;
 
         // Refuse to start if the backing full node already follows consensus rules we
         // cannot interpret. If the only incompatibilities are still in the future, this
@@ -158,6 +159,12 @@ impl AsyncRunnable for StartCmd {
         info!("All tasks have been asked to stop, waiting for remaining tasks to finish");
 
         res
+    }
+}
+
+impl AsyncRunnable for StartCmd {
+    async fn run(&self) -> Result<(), Error> {
+        crate::application::chain_runtime().run_start().await
     }
 }
 

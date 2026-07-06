@@ -31,7 +31,9 @@ use zebra_state::ReadStateService;
 #[cfg(feature = "spend-index")]
 use super::SpendStatus;
 use super::read_state::{AbortOnDrop, init_read_state_service};
-use super::{BlockLocator, Chain, ChainBlock, ChainError, ChainTx, ChainView, ReportedUpgrade};
+use super::{
+    BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView, ReportedUpgrade,
+};
 use crate::{
     components::TaskHandle,
     config::ZalletConfig,
@@ -114,6 +116,18 @@ impl ZebraChain {
         });
 
         Ok((chain, task))
+    }
+}
+
+/// Factory for the `zebra-state` chain backend.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ZebraBackend;
+
+impl ChainFactory for ZebraBackend {
+    type Chain = ZebraChain;
+
+    async fn build(&self, config: &ZalletConfig) -> Result<(ZebraChain, TaskHandle), Error> {
+        ZebraChain::new(config).await
     }
 }
 

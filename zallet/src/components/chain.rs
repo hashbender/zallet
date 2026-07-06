@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::ops::Range;
 
-use futures::stream::BoxStream;
+use futures::{future::BoxFuture, stream::BoxStream};
 use nonempty::NonEmpty;
 use serde::Deserialize;
 use tracing::{error, info, warn};
@@ -33,6 +33,8 @@ use crate::error::{Error, ErrorKind};
 use crate::fl;
 use crate::network::{NETWORK_UPGRADES, Network};
 
+use crate::{components::TaskHandle, config::ZalletConfig};
+
 mod error;
 pub(crate) use error::ChainError;
 
@@ -44,19 +46,68 @@ mod read_state;
 #[cfg(feature = "zaino")]
 mod zaino;
 #[cfg(feature = "zaino")]
-pub(crate) use zaino::ZainoChain;
+pub(crate) use zaino::ZainoBackend;
 
 #[cfg(feature = "zebra-state")]
 mod zebra;
 #[cfg(feature = "zebra-state")]
-pub(crate) use zebra::ZebraChain;
+pub(crate) use zebra::ZebraBackend;
 
-/// The concrete chain backend selected at compile time by the `zaino` / `zebra-state`
-/// feature. Construction sites name this; everything else is generic over [`Chain`].
+/// A capability for constructing the process's chain backend.
+///
+/// Implemented by a unit struct in each backend module. The selected factory is
+/// registered at boot and consumed through a dyn-safe runtime boundary;
+/// everything downstream of construction is statically dispatched over [`Chain`].
+pub(crate) trait ChainFactory: Send + Sync + 'static {
+    /// The concrete chain backend this factory constructs.
+    type Chain: Chain;
+
+    /// Connects to the chain-data source described by `config`, returning the
+    /// backend handle and the task driving its indexer.
+    fn build(
+        &self,
+        config: &ZalletConfig,
+    ) -> impl Future<Output = Result<(Self::Chain, TaskHandle), Error>> + Send;
+}
+
+/// The dyn-safe boundary through which commands reach the registered chain backend.
+///
+/// The blanket impl over [`ChainFactory`] encloses the whole chain-dependent tail of
+/// each command, so the concrete [`Chain`] type never crosses this boundary — type
+/// erasure costs one virtual call per command invocation.
+pub(crate) trait ChainRuntime: Send + Sync {
+    /// Runs the chain-dependent body of `zallet start`.
+    fn run_start(&self) -> BoxFuture<'_, Result<(), Error>>;
+
+    /// Runs the chain-dependent body of `zallet migrate-zcashd-wallet`.
+    #[cfg(all(zallet_build = "wallet", feature = "zcashd-import"))]
+    fn run_migrate_zcashd_wallet<'a>(
+        &'a self,
+        cmd: &'a crate::cli::MigrateZcashdWalletCmd,
+    ) -> BoxFuture<'a, Result<(), Error>>;
+}
+
+impl<F: ChainFactory> ChainRuntime for F {
+    fn run_start(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(crate::cli::StartCmd::run_with(self))
+    }
+
+    #[cfg(all(zallet_build = "wallet", feature = "zcashd-import"))]
+    fn run_migrate_zcashd_wallet<'a>(
+        &'a self,
+        cmd: &'a crate::cli::MigrateZcashdWalletCmd,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(cmd.run_with(self))
+    }
+}
+
+/// The chain backend factory selected at compile time by the `zaino` / `zebra-state`
+/// feature. Registered with the application at boot; everything else reaches the
+/// backend through [`ChainRuntime`].
 #[cfg(feature = "zaino")]
-pub(crate) type ChainBackend = ZainoChain;
+pub(crate) const DEFAULT_CHAIN_RUNTIME: &(dyn ChainRuntime) = &ZainoBackend;
 #[cfg(feature = "zebra-state")]
-pub(crate) type ChainBackend = ZebraChain;
+pub(crate) const DEFAULT_CHAIN_RUNTIME: &(dyn ChainRuntime) = &ZebraBackend;
 
 /// A handle to a source of Zcash chain data.
 ///
