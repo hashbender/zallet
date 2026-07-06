@@ -33,7 +33,7 @@ use zip32::{AccountId, fingerprint::SeedFingerprint};
 use crate::{
     cli::MigrateZcashdWalletCmd,
     components::{
-        chain::{Chain, ChainBackend, ChainError, ChainView},
+        chain::{Chain, ChainError, ChainFactory, ChainView},
         database::Database,
         keystore::KeyStore,
     },
@@ -55,8 +55,10 @@ pub const ZCASHD_LEGACY_SOURCE: &str = "zcashd_legacy";
 /// key derivation after the zcashd v4.7.0 upgrade.
 pub const ZCASHD_MNEMONIC_SOURCE: &str = "zcashd_mnemonic";
 
-impl AsyncRunnable for MigrateZcashdWalletCmd {
-    async fn run(&self) -> Result<(), Error> {
+impl MigrateZcashdWalletCmd {
+    /// Runs the zcashd-wallet migration against the chain backend produced by
+    /// `factory`.
+    pub(crate) async fn run_with<F: ChainFactory>(&self, factory: &F) -> Result<(), Error> {
         let config = APP.config();
 
         if !self.this_is_alpha_code_and_you_will_need_to_redo_the_migration_later {
@@ -67,7 +69,7 @@ impl AsyncRunnable for MigrateZcashdWalletCmd {
         let (chain, _chain_indexer_task_handle) = if self.no_scan {
             (None, None)
         } else {
-            let (c, h) = ChainBackend::new(&config).await?;
+            let (c, h) = factory.build(&config).await?;
             (Some(c), Some(h))
         };
         let db = Database::open(&config).await?;
@@ -89,6 +91,14 @@ impl AsyncRunnable for MigrateZcashdWalletCmd {
         .await?;
 
         Ok(())
+    }
+}
+
+impl AsyncRunnable for MigrateZcashdWalletCmd {
+    async fn run(&self) -> Result<(), Error> {
+        crate::application::chain_runtime()
+            .run_migrate_zcashd_wallet(self)
+            .await
     }
 }
 
