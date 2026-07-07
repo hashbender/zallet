@@ -157,6 +157,8 @@ err-init-identity-not-usable = Identity file at {$path} is not usable: {$error}
 err-init-rpc-auth-invalid = Invalid '{-cfg-rpc-auth}' configuration
 err-config-file-not-found = Configuration file at {$path} does not exist.
 err-config-file-invalid = Failed to parse configuration file at {$path}: {$error}
+err-config-backend-mismatch = The config file selects the '{$configured}' chain backend, but this binary provides the '{$provided}' backend. Run the `zallet` launcher (or the matching backend binary) instead, or change the config file's `backend` key.
+err-config-backend-unset = The config file does not set a `backend`, which selects the default ('zebra-state') chain backend, but this binary provides the '{$provided}' backend. Set `backend = "{$provided}"` in the config file to use it.
 
 ## Keystore errors
 
