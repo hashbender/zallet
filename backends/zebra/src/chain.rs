@@ -355,11 +355,22 @@ impl<R: ChainReader> ChainView for ZebraChainView<R> {
         }
         .to_frontier();
 
+        // Zebra does not expose a separate Ironwood note commitment tree, and Ironwood
+        // (NU6.3) is not active on any chain Zallet syncs today, so its final tree is always
+        // empty here. When Zebra surfaces an Ironwood treestate, read it like the Orchard tree
+        // above; Ironwood shares the Orchard tree's shape.
+        let final_ironwood_tree = CommitmentTree::<
+            orchard::tree::MerkleHashOrchard,
+            { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+        >::empty()
+        .to_frontier();
+
         Ok(Some(ChainState::new(
             height,
             hash,
             final_sapling_tree,
             final_orchard_tree,
+            final_ironwood_tree,
         )))
     }
 

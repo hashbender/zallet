@@ -162,6 +162,7 @@ pub(super) async fn scan_blocks<V: ChainView>(
             from_state.block_hash(),
             Some(from_state.final_sapling_tree().tree_size() as u32),
             Some(from_state.final_orchard_tree().tree_size() as u32),
+            Some(from_state.final_ironwood_tree().tree_size() as u32),
         ));
 
         // Get the nullifiers for the unspent notes we are tracking, and the transparent
@@ -250,6 +251,7 @@ pub(super) async fn scan_block<V: ChainView>(
         from_state.block_hash(),
         Some(from_state.final_sapling_tree().tree_size() as u32),
         Some(from_state.final_orchard_tree().tree_size() as u32),
+        Some(from_state.final_ironwood_tree().tree_size() as u32),
     ));
 
     // Get the nullifiers for the unspent notes we are tracking, and the transparent
