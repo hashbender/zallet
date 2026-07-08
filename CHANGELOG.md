@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 During the alpha period, no Semantic Versioning is followed; all releases should
 be considered breaking changes.
 
+## [Unreleased]
+
+### Fixed
+
+- `steady_state` sync no longer crashes the whole wallet when the backend's best
+  chain reorgs away a block the wallet had already stored (`BlockConflict`).
+  Previously this error wasn't recognized as retryable, so it propagated as a
+  fatal error and required a full restart to recover. It's now handled the same
+  way as other reorgs: the wallet's last known-good position is run through the
+  existing fork-point search (which walks back as far as it actually needs to,
+  rather than assuming the reorg is exactly one block deep), then rewinds and
+  resumes syncing automatically.
+- `initialize()`'s startup catch-up scan could also crash the wallet on a
+  transient stale-view error (e.g. a reorg in progress right as the wallet
+  started) that `steady_state`'s main loop already tolerates. It now retries the
+  same way.
+
 ## [0.1.0-alpha.4] - 2026-06-25
 
 ### Added
@@ -32,12 +49,12 @@ be considered breaking changes.
   - `z_shieldcoinbase`
 
 ### Changed
-
 - **This release is not compatible with wallets created by earlier alpha
   releases.** The embedded Zaino chain indexer made a backwards-incompatible
   change to its database format (zingolabs/zaino#914), which this release pulls
   in. Zallet now refuses to open wallet databases last used by `0.1.0-alpha.3`
   or earlier; start again with a fresh Zallet wallet or a new data directory.
+- MSRV updated to 1.88
 - Updated the Zaino chain indexer to a pre-release `rc-0.4.0` build
   (zingolabs/zaino#1238) that retains NU 6.2 support and adds optional
   ("ephemeral") finalised state. The embedded indexer now runs in ephemeral
