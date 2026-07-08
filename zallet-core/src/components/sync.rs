@@ -59,6 +59,7 @@ use zcash_client_backend::{
     sync::decryptor,
 };
 use zcash_client_sqlite::AccountUuid;
+use zcash_client_sqlite::error::SqliteClientError;
 use zcash_primitives::block::BlockHash;
 #[cfg(not(feature = "spend-index"))]
 use zcash_protocol::TxId;
@@ -294,7 +295,7 @@ async fn initialize<C: Chain>(
             }
         };
 
-        if steps::scan_blocks(
+        match steps::scan_blocks(
             chain_view,
             db_data,
             params,
@@ -302,13 +303,28 @@ async fn initialize<C: Chain>(
             &decryptor,
             shutdown_height,
         )
-        .await?
-        .is_break()
+        .await
         {
-            // The chain has already reached the consensus-divergence height during initial
-            // scanning. Stop here with the tip we have; `steady_state` will shut the wallet
-            // down rather than advance past the boundary.
-            break (current_tip, starting_boundary);
+            Ok(flow) if flow.is_break() => {
+                // The chain has already reached the consensus-divergence height during
+                // initial scanning. Stop here with the tip we have; `steady_state` will
+                // shut the wallet down rather than advance past the boundary.
+                break (current_tip, starting_boundary);
+            }
+            Ok(_) => {}
+            // A stale-view error here means the initial "Verify"/catch-up scan captured
+            // a snapshot referencing a non-finalized block that was reorged away before
+            // it could be read — the same transient condition `steady_state` already
+            // tolerates (see `is_retryable`). Unlike `steady_state`'s loop, this one has
+            // no built-in retry, so without this it crashed the whole wallet on startup
+            // whenever a reorg happened to be in progress right as it started.
+            Err(error) if is_retryable(&error) => {
+                warn!(
+                    "Chain view became stale during initial scan, re-pinning to the current tip: {error}"
+                );
+                time::sleep(REORG_RETRY_BACKOFF).await;
+            }
+            Err(error) => return Err(error),
         }
     };
 
@@ -486,6 +502,38 @@ async fn steady_state<C: Chain>(
                 if is_retryable(&error) {
                     warn!("Chain view became stale, re-pinning to the current tip: {error}");
                     time::sleep(REORG_RETRY_BACKOFF).await;
+                    continue;
+                }
+                // A block conflict means the backend's best chain reorged away the block
+                // previously stored at this height. The conflict only tells us that
+                // *this* height is wrong, not how deep the reorg actually goes — a reorg
+                // that replaced more than one block would leave the block just below the
+                // conflict wrong too, and `put_block` only ever checks for a collision at
+                // the exact height it's writing, not that its parent still matches what's
+                // stored one below it. So don't assume a depth-1 rewind is enough: treat
+                // the wallet's last known-good position (`height - 1`) as a fresh
+                // "previous tip" and run it through the same fork-point search used for
+                // ordinary reorg detection, which walks back as far as it actually needs to.
+                if let SyncError::Other(ref e) = error
+                    && let SqliteClientError::BlockConflict(height) = **e
+                {
+                    let rewind_height = height - 1;
+                    warn!(
+                        "Block at height {height} conflicts with previously stored data \
+                         (likely a reorg); searching for the fork point and retrying"
+                    );
+                    let candidate_tip = ChainBlock::new(
+                        rewind_height,
+                        db_data.get_block_hash(rewind_height)?.ok_or_else(|| {
+                            SyncError::WalletDivergedBelowBirthday {
+                                birthday: rewind_height,
+                            }
+                        })?,
+                    );
+                    let chain_view = chain.snapshot().await.map_err(SyncError::Chain)?;
+                    let fork_point = locate_fork_point(&chain_view, db_data, candidate_tip).await?;
+                    db_data.truncate_to_height(fork_point.height())?;
+                    prev_tip = fork_point;
                     continue;
                 }
                 return Err(error);
