@@ -24,9 +24,25 @@
           targets = [ muslTarget ];
         };
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+        # craneLib.filterCargoSources only recognises Cargo.toml/Cargo.lock
+        # files that belong to the ROOT workspace's resolution graph. Since
+        # zcash/zallet#540, backends/zebra and backends/zaino are each their
+        # own workspace (excluded from the root Cargo.toml's `[workspace]`),
+        # so filterCargoSources silently drops their Cargo.lock files from the
+        # filtered $src — Cargo.toml and src/ survive (matched generically),
+        # but Cargo.lock does not. `replaceCargoLockHook`'s `replaceCargoLock`
+        # then has no backends/*/Cargo.lock to move aside, and instead
+        # clobbers the ROOT Cargo.lock with the backend's lockfile content,
+        # leaving Cargo unable to resolve backends/zaino's git-patched `age`
+        # dependency correctly ("requires a lock file to be present first").
+        # Explicitly keep every backends/*/Cargo.lock (and Cargo.toml, for
+        # symmetry/robustness) regardless of what filterCargoSources decides.
+        isBackendCargoFile = path:
+          (builtins.match ".*/backends/[^/]+/Cargo\\.(toml|lock)$" path != null);
         ftlOrCargo = path: type:
           (builtins.match ".*\\.ftl$" path != null)
           || (builtins.match ".*/i18n\\.toml$" path != null)
+          || (isBackendCargoFile path)
           || (craneLib.filterCargoSources path type);
         src = pkgs.lib.cleanSourceWith { src = ./.; filter = ftlOrCargo; name = "source"; };
         # The *-sys C/C++ deps need a coherent musl toolchain. pkgsMusl.clangStdenv.cc
@@ -72,7 +88,45 @@
                 " --manifest-path ${manifestDir}/Cargo.toml"
             + pkgs.lib.optionalString (features != [ ])
                 " --features ${pkgs.lib.concatStringsSep "," features}";
+          # crane's mkDummySrc (used for the deps-only derivation that
+          # buildPackage builds internally to cache dependency compilation)
+          # ALWAYS copies the `cargoLock` argument to the dummy tree's ROOT as
+          # `$out/Cargo.lock` — it has no concept of a lockfile living in a
+          # workspace subdirectory (see crane's lib/mkDummySrc.nix,
+          # `copyCargoLock`). backends/zaino and backends/zebra are each their
+          # own `[workspace]` (excluded from the root Cargo.toml), so Cargo
+          # looks for the lockfile NEXT TO `--manifest-path
+          # ${manifestDir}/Cargo.toml`, not at the tree root. Without this,
+          # `cargo check --manifest-path backends/zaino/Cargo.toml` finds no
+          # lockfile in that directory and cannot resolve backends/zaino's
+          # git-patched `age` dependency ("requires a lock file to be present
+          # first"). replaceCargoLockHook (a prePatchHook) has already placed
+          # the right content at the tree root by the time postPatch runs, in
+          # BOTH the dummy deps-only build and the real build — so just copy
+          # root Cargo.lock into the workspace subdirectory Cargo actually
+          # reads from.
+          postPatch = pkgs.lib.optionalString (manifestDir != null) ''
+            cp Cargo.lock ${manifestDir}/Cargo.lock
+          '';
           CARGO_BUILD_TARGET = muslTarget;
+          # crane's `installFromCargoBuildLogHook` registers a POSTBUILD hook
+          # (not an install-phase one — overriding installPhaseCommand does
+          # NOT skip it) that runs `cargo metadata --format-version 1` with NO
+          # --manifest-path, resolving against the tree-root workspace
+          # (zallet-core, zallet, tools/gen-copyright), not
+          # backends/${manifestDir}. `cargo metadata` resolves
+          # dev-dependencies too, and zallet-core's dev-deps (proptest,
+          # trycmd, ...) were never vendored for backends/zaino's or
+          # backends/zebra's independent lockfile/vendor dir (zcash/zallet#540
+          # deliberately decouples the three resolution graphs) — so that
+          # metadata call fails ("no matching package found: proptest"),
+          # which corrupts the hook's downstream jq invocation ("unexpected
+          # '|'") with a confusing error that hides the real failure above it.
+          # `doNotPostBuildInstallCargoBinaries` is the hook's own documented
+          # escape hatch (see its setup-hook script) — set it and install the
+          # already-built binary ourselves from cargo's well-known --target
+          # output path instead.
+          doNotPostBuildInstallCargoBinaries = manifestDir != null;
           # Static musl; use the musl clang as the linker so libc++ + crt resolve
           # coherently (a generic cc-wrapper mis-targets gnu vs musl here).
           CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static -C codegen-units=1 -C linker=${clangCC}/bin/cc -C link-arg=-static";
@@ -106,6 +160,36 @@
         // {
           "CC_${targetEnvSuffix}" = "${clangCC}/bin/cc";
           "CXX_${targetEnvSuffix}" = "${clangCC}/bin/c++";
+        }
+        # With `--manifest-path ${manifestDir}/Cargo.toml`, Cargo resolves the
+        # default target dir relative to THAT workspace's root
+        # (${manifestDir}/target/...), not the build's $PWD (the tree root)
+        # — but crane's installCargoArtifactsHook looks for $CARGO_TARGET_DIR
+        # (defaulting to plain `target`) at $PWD, so it can't find anything
+        # to install ("cd: target: No such file or directory") once a
+        # manifestDir is involved. Pin it explicitly so both Cargo and the
+        # hook agree on one absolute location. Only for manifestDir != null:
+        # the launcher (manifestDir == null) already worked correctly with
+        # crane's own default before this was added, and forcing the same
+        # value onto it broke its unrelated, working install path
+        # (stripRustToolchain ran before $out existed).
+        //
+        pkgs.lib.optionalAttrs (manifestDir != null) {
+          CARGO_TARGET_DIR = "target";
+          # See the doNotPostBuildInstallCargoBinaries comment above: install
+          # the already-built binary ourselves. Only set for manifestDir !=
+          # null — omitting the attribute (not just emptying its value) for
+          # the launcher is required for crane's own default
+          # `installPhaseCommand` (the one that moves
+          # $postBuildInstallFromCargoBuildLogOut to $out) to take effect via
+          # its `args.installPhaseCommand or <default>` fallback; an explicit
+          # `""` here would override that default with a no-op and $out would
+          # never be created, and the postInstall toolchain-stripping hook
+          # would fail with "No such file or directory".
+          installPhaseCommand = ''
+            mkdir -p $out/bin
+            cp target/${muslTarget}/release/${binName} $out/bin/${binName}
+          '';
         });
         # The zebra-state backend binary owns the completions/manpages share
         # tree that the deb + StageX export consume (both backends generate
