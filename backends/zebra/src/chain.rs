@@ -97,7 +97,9 @@ impl ZebraChain {
         )?;
 
         // Open zebrad's state read-only and start the non-finalized syncer.
-        let (read_state_service, sync_task) = {
+        // The chain-tip-change watcher is only needed by the zaino backend's
+        // `ValidatorConnector::State`; this backend follows the tip directly.
+        let (read_state_service, _chain_tip_change, sync_task) = {
             use zcash_protocol::consensus::Parameters as _;
             let zebra_network =
                 network_to_zebra(params.network_type()).map_err(|e| ErrorKind::Init.context(e))?;
@@ -193,6 +195,12 @@ impl Chain for ZebraChain {
         &self,
     ) -> Result<Vec<CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>>, ChainError> {
         self.reader().orchard_subtree_roots().await
+    }
+
+    async fn get_ironwood_subtree_roots(
+        &self,
+    ) -> Result<Vec<CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>>, ChainError> {
+        self.reader().ironwood_subtree_roots().await
     }
 
     async fn snapshot(&self) -> Result<Self::View, ChainError> {
@@ -689,6 +697,11 @@ mod tests {
             Ok(vec![])
         }
         async fn orchard_subtree_roots(
+            &self,
+        ) -> Result<Vec<CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>>, ChainError> {
+            Ok(vec![])
+        }
+        async fn ironwood_subtree_roots(
             &self,
         ) -> Result<Vec<CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>>, ChainError> {
             Ok(vec![])
