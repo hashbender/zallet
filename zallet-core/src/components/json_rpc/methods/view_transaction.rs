@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use documented::Documented;
 use jsonrpsee::core::RpcResult;
-use orchard::note_encryption::OrchardDomain;
+use orchard::note_encryption::{
+    DomainVersion, IronwoodVersion, NoteEncryptionDomain, OrchardVersion,
+};
 use rusqlite::{OptionalExtension, named_params};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -19,7 +21,7 @@ use zcash_protocol::{
     ShieldedPool, TxId,
     consensus::{BlockHeight, Parameters},
     memo::Memo,
-    value::{BalanceError, Zatoshis},
+    value::{BalanceError, ZatBalance, Zatoshis},
 };
 
 use crate::components::{
@@ -32,14 +34,12 @@ use crate::components::{
 };
 
 #[cfg(zallet_build = "wallet")]
-use {
-    crate::components::json_rpc::utils::{JsonZecBalance, value_from_zat_balance},
-    zcash_protocol::value::ZatBalance,
-};
+use crate::components::json_rpc::utils::{JsonZecBalance, value_from_zat_balance};
 
 const POOL_TRANSPARENT: &str = "transparent";
 const POOL_SAPLING: &str = "sapling";
 const POOL_ORCHARD: &str = "orchard";
+const POOL_IRONWOOD: &str = "ironwood";
 
 /// The number of blocks within expiry height when a tx is considered to be expiring soon.
 const TX_EXPIRING_SOON_THRESHOLD: u32 = 3;
@@ -121,7 +121,7 @@ pub(crate) struct Transaction {
 struct Spend {
     /// The value pool.
     ///
-    /// One of `["transparent", "sapling", "orchard"]`.
+    /// One of `["transparent", "sapling", "orchard", "ironwood"]`.
     pool: &'static str,
 
     /// (transparent) the index of the spend within `vin`.
@@ -186,7 +186,7 @@ struct Spend {
 struct Output {
     /// The value pool.
     ///
-    /// One of `["transparent", "sapling", "orchard"]`.
+    /// One of `["transparent", "sapling", "orchard", "ironwood"]`.
     pool: &'static str,
 
     /// (transparent) the index of the output within the `vout`.
@@ -348,8 +348,9 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
         let (pool_prefix, output_prefix) = match pool {
             ShieldedPool::Sapling => ("sapling", "output"),
             ShieldedPool::Orchard => ("orchard", "action"),
-            // Ironwood is not yet supported; elide such spends rather than failing the call.
-            ShieldedPool::Ironwood => return Ok(None),
+            // Ironwood notes are Orchard-shaped: they live in `ironwood_received_notes` and are
+            // indexed by action index, exactly like Orchard.
+            ShieldedPool::Ironwood => ("ironwood", "action"),
         };
 
         wallet
@@ -395,8 +396,8 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
         let output_pool = match pool {
             ShieldedPool::Sapling => 2,
             ShieldedPool::Orchard => 3,
-            // Ironwood is not yet supported; elide the sent-to address rather than failing.
-            ShieldedPool::Ironwood => return Ok(None),
+            // Ironwood sent notes are recorded in `sent_notes` under pool code 4.
+            ShieldedPool::Ironwood => 4,
         };
         Ok(wallet
             .with_raw(|conn, _| {
@@ -423,6 +424,171 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
             // If we don't have a cached recipient, fall back on an address that
             // corresponds to the actual receiver.
             .unwrap_or_else(fallback_addr))
+    }
+
+    // Collects the wallet-viewable spends from an Orchard-family bundle (Orchard or Ironwood).
+    // Ironwood actions are Orchard-shaped and carry Orchard nullifiers, so Orchard and Ironwood
+    // spends are processed identically; only the pool (and thus the received-notes table that
+    // `output_with_nullifier` consults) and the reported pool name differ.
+    fn orchard_family_spends(
+        wallet: &DbConnection,
+        bundle: &orchard::Bundle<orchard::bundle::Authorized, ZatBalance>,
+        pool: ShieldedPool,
+        pool_name: &'static str,
+    ) -> RpcResult<Vec<Spend>> {
+        let mut spends = vec![];
+        for (action, idx) in bundle.actions().iter().zip(0..) {
+            if let Some((txid_prev, action_prev, account_id, address, value)) =
+                output_with_nullifier(wallet, pool, action.nullifier().to_bytes())?
+            {
+                spends.push(Spend {
+                    pool: pool_name,
+                    t_in: None,
+                    spend: None,
+                    action: Some(idx),
+                    txid_prev: txid_prev.to_string(),
+                    t_out_prev: None,
+                    output_prev: None,
+                    action_prev: Some(action_prev),
+                    account_uuid: Some(account_id.expose_uuid().to_string()),
+                    address,
+                    value: value_from_zatoshis(value),
+                    value_zat: value.into_u64(),
+                });
+            }
+        }
+        Ok(spends)
+    }
+
+    // Collects the wallet-viewable outputs from an Orchard-family bundle (Orchard or Ironwood),
+    // trial-decrypting each action with the account's Orchard viewing keys (incoming via IVKs,
+    // outgoing via OVKs) under the note-encryption domain selected by `Ver`. Ironwood carries
+    // version 3 note plaintexts (`IronwoodVersion`); Orchard uses `OrchardVersion`. Everything
+    // else, including the Orchard-receiver address encoding, is identical.
+    fn orchard_family_outputs<Ver: DomainVersion>(
+        wallet: &DbConnection,
+        txid: &TxId,
+        bundle: &orchard::Bundle<orchard::bundle::Authorized, ZatBalance>,
+        orchard_ivks: &[(
+            AccountUuid,
+            orchard::keys::PreparedIncomingViewingKey,
+            zip32::Scope,
+        )],
+        ovks: &[([u8; 32], zip32::Scope)],
+        pool: ShieldedPool,
+        pool_name: &'static str,
+    ) -> RpcResult<Vec<Output>> {
+        let incoming: BTreeMap<
+            u16,
+            (
+                orchard::Note,
+                AccountUuid,
+                Option<orchard::Address>,
+                [u8; 512],
+            ),
+        > = bundle
+            .actions()
+            .iter()
+            .zip(0..)
+            .filter_map(|(action, idx)| {
+                let domain = NoteEncryptionDomain::<Ver>::for_action(action);
+                orchard_ivks.iter().find_map(|(account_id, ivk, scope)| {
+                    try_note_decryption(&domain, ivk, action).map(|(n, a, m)| {
+                        (
+                            idx,
+                            (
+                                n,
+                                *account_id,
+                                matches!(scope, zip32::Scope::External).then_some(a),
+                                m,
+                            ),
+                        )
+                    })
+                })
+            })
+            .collect();
+
+        let outgoing: BTreeMap<u16, (orchard::Note, Option<orchard::Address>, [u8; 512])> = bundle
+            .actions()
+            .iter()
+            .zip(0..)
+            .filter_map(|(action, idx)| {
+                let domain = NoteEncryptionDomain::<Ver>::for_action(action);
+                ovks.iter().find_map(move |(ovk, scope)| {
+                    try_output_recovery_with_ovk(
+                        &domain,
+                        &orchard::keys::OutgoingViewingKey::from(*ovk),
+                        action,
+                        action.cv_net(),
+                        &action.encrypted_note().out_ciphertext,
+                    )
+                    .map(|(n, a, m)| {
+                        (
+                            idx,
+                            (n, matches!(scope, zip32::Scope::External).then_some(a), m),
+                        )
+                    })
+                })
+            })
+            .collect();
+
+        let mut outputs = vec![];
+        for (_, idx) in bundle.actions().iter().zip(0..) {
+            if let Some((note, account_uuid, addr, memo)) = incoming
+                .get(&idx)
+                .map(|(n, account_id, addr, memo)| {
+                    (n, Some(account_id.expose_uuid().to_string()), addr, memo)
+                })
+                .or_else(|| {
+                    outgoing
+                        .get(&idx)
+                        .map(|(n, addr, memo)| (n, None, addr, memo))
+                })
+            {
+                let address = sent_to_address(wallet, txid, pool, idx, || {
+                    addr.map(|address| {
+                        ZcashAddress::from_unified(
+                            wallet.params().network_type(),
+                            unified::Address::try_from_items(vec![unified::Receiver::Orchard(
+                                address.to_raw_address_bytes(),
+                            )])
+                            .expect("valid"),
+                        )
+                        .encode()
+                    })
+                })?;
+                // Don't need to check `funded_by_this_wallet` because we only reach this
+                // line if the output was decryptable by an IVK (so it doesn't matter) or
+                // an OVK (so it is by definition outgoing, even if we can't currently
+                // detect a spent nullifier due to non-linear scanning).
+                let outgoing = Some(account_uuid.is_none());
+                let wallet_internal = address.is_none();
+
+                let value = Zatoshis::const_from_u64(note.value().inner());
+
+                let memo_str = match Memo::from_bytes(memo) {
+                    Ok(Memo::Text(text_memo)) => Some(text_memo.into()),
+                    _ => None,
+                };
+                let memo = Some(hex::encode(memo));
+
+                outputs.push(Output {
+                    pool: pool_name,
+                    t_out: None,
+                    output: None,
+                    action: Some(idx),
+                    account_uuid,
+                    address,
+                    outgoing,
+                    wallet_internal,
+                    value: value_from_zatoshis(value),
+                    value_zat: value.into_u64(),
+                    memo,
+                    memo_str,
+                });
+            }
+        }
+        Ok(outputs)
     }
 
     // Process spends first, so we can use them to determine whether this transaction was
@@ -514,30 +680,21 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
     }
 
     if let Some(bundle) = tx.orchard_bundle() {
-        for (action, idx) in bundle.actions().iter().zip(0..) {
-            let spent_note = output_with_nullifier(
-                wallet,
-                ShieldedPool::Orchard,
-                action.nullifier().to_bytes(),
-            )?;
+        spends.extend(orchard_family_spends(
+            wallet,
+            bundle,
+            ShieldedPool::Orchard,
+            POOL_ORCHARD,
+        )?);
+    }
 
-            if let Some((txid_prev, action_prev, account_id, address, value)) = spent_note {
-                spends.push(Spend {
-                    pool: POOL_ORCHARD,
-                    t_in: None,
-                    spend: None,
-                    action: Some(idx),
-                    txid_prev: txid_prev.to_string(),
-                    t_out_prev: None,
-                    output_prev: None,
-                    action_prev: Some(action_prev),
-                    account_uuid: Some(account_id.expose_uuid().to_string()),
-                    address,
-                    value: value_from_zatoshis(value),
-                    value_zat: value.into_u64(),
-                });
-            }
-        }
+    if let Some(bundle) = tx.ironwood_bundle() {
+        spends.extend(orchard_family_spends(
+            wallet,
+            bundle,
+            ShieldedPool::Ironwood,
+            POOL_IRONWOOD,
+        )?);
     }
 
     let funded_by_this_wallet = spends.iter().any(|spend| spend.account_uuid.is_some());
@@ -709,115 +866,27 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
     }
 
     if let Some(bundle) = tx.orchard_bundle() {
-        let incoming: BTreeMap<
-            u16,
-            (
-                orchard::Note,
-                AccountUuid,
-                Option<orchard::Address>,
-                [u8; 512],
-            ),
-        > = bundle
-            .actions()
-            .iter()
-            .zip(0..)
-            .filter_map(|(action, idx)| {
-                let domain = OrchardDomain::for_action(action);
-                orchard_ivks.iter().find_map(|(account_id, ivk, scope)| {
-                    try_note_decryption(&domain, ivk, action).map(|(n, a, m)| {
-                        (
-                            idx,
-                            (
-                                n,
-                                *account_id,
-                                matches!(scope, zip32::Scope::External).then_some(a),
-                                m,
-                            ),
-                        )
-                    })
-                })
-            })
-            .collect();
+        outputs.extend(orchard_family_outputs::<OrchardVersion>(
+            wallet,
+            &txid,
+            bundle,
+            &orchard_ivks,
+            &ovks,
+            ShieldedPool::Orchard,
+            POOL_ORCHARD,
+        )?);
+    }
 
-        let outgoing: BTreeMap<u16, (orchard::Note, Option<orchard::Address>, [u8; 512])> = bundle
-            .actions()
-            .iter()
-            .zip(0..)
-            .filter_map(|(action, idx)| {
-                let domain = OrchardDomain::for_action(action);
-                ovks.iter().find_map(move |(ovk, scope)| {
-                    try_output_recovery_with_ovk(
-                        &domain,
-                        &orchard::keys::OutgoingViewingKey::from(*ovk),
-                        action,
-                        action.cv_net(),
-                        &action.encrypted_note().out_ciphertext,
-                    )
-                    .map(|(n, a, m)| {
-                        (
-                            idx,
-                            (n, matches!(scope, zip32::Scope::External).then_some(a), m),
-                        )
-                    })
-                })
-            })
-            .collect();
-
-        for (_, idx) in bundle.actions().iter().zip(0..) {
-            if let Some((note, account_uuid, addr, memo)) = incoming
-                .get(&idx)
-                .map(|(n, account_id, addr, memo)| {
-                    (n, Some(account_id.expose_uuid().to_string()), addr, memo)
-                })
-                .or_else(|| {
-                    outgoing
-                        .get(&idx)
-                        .map(|(n, addr, memo)| (n, None, addr, memo))
-                })
-            {
-                let address = sent_to_address(wallet, &txid, ShieldedPool::Orchard, idx, || {
-                    addr.map(|address| {
-                        ZcashAddress::from_unified(
-                            wallet.params().network_type(),
-                            unified::Address::try_from_items(vec![unified::Receiver::Orchard(
-                                address.to_raw_address_bytes(),
-                            )])
-                            .expect("valid"),
-                        )
-                        .encode()
-                    })
-                })?;
-                // Don't need to check `funded_by_this_wallet` because we only reach this
-                // line if the output was decryptable by an IVK (so it doesn't matter) or
-                // an OVK (so it is by definition outgoing, even if we can't currently
-                // detect a spent nullifier due to non-linear scanning).
-                let outgoing = Some(account_uuid.is_none());
-                let wallet_internal = address.is_none();
-
-                let value = Zatoshis::const_from_u64(note.value().inner());
-
-                let memo_str = match Memo::from_bytes(memo) {
-                    Ok(Memo::Text(text_memo)) => Some(text_memo.into()),
-                    _ => None,
-                };
-                let memo = Some(hex::encode(memo));
-
-                outputs.push(Output {
-                    pool: POOL_ORCHARD,
-                    t_out: None,
-                    output: None,
-                    action: Some(idx),
-                    account_uuid,
-                    address,
-                    outgoing,
-                    wallet_internal,
-                    value: value_from_zatoshis(value),
-                    value_zat: value.into_u64(),
-                    memo,
-                    memo_str,
-                });
-            }
-        }
+    if let Some(bundle) = tx.ironwood_bundle() {
+        outputs.extend(orchard_family_outputs::<IronwoodVersion>(
+            wallet,
+            &txid,
+            bundle,
+            &orchard_ivks,
+            &ovks,
+            ShieldedPool::Ironwood,
+            POOL_IRONWOOD,
+        )?);
     }
 
     let chain_tip = chain_view
