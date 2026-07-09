@@ -16,6 +16,12 @@ be considered breaking changes.
   `regtest_nuparams`, so it interprets the co-located zebrad's on-disk state
   under matching consensus rules. Previously these backends rejected regtest at
   startup with an "does not support regtest" error.
+- `z_viewtransaction` now reports Ironwood spends and outputs. Ironwood notes are
+  Orchard-shaped and are trial-decrypted with the account's Orchard viewing keys
+  under the Ironwood note-encryption domain, and Ironwood spends are resolved
+  against the `ironwood_received_notes` table. Previously the method elided
+  Ironwood actions entirely (they were reported for neither spends, outputs, nor
+  sent-to addresses).
 
 ### Fixed
 
