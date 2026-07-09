@@ -45,6 +45,26 @@ impl AsyncRunnable for ExportMnemonicCmd {
             .await
             .map_err(|e| ErrorKind::Generic.context(e))?;
 
+        eprintln!();
+        eprintln!("WARNING: the output above is NOT your mnemonic in plain text. It is encrypted");
+        eprintln!("to the wallet's age identity, and decrypting it requires that identity file");
+        eprintln!("(and its passphrase, if it is passphrase-encrypted).");
+        eprintln!();
+        eprintln!("This mnemonic may also not be a complete backup of your wallet. It backs up");
+        eprintln!("only funds derived from this seed; this wallet may also hold spending keys");
+        eprintln!("that no mnemonic covers (Sapling keys imported with z_importkey, and other");
+        eprintln!("standalone key material), which are NOT included here. To back those up you");
+        eprintln!("must ALSO keep a secure copy of BOTH:");
+        eprintln!("  - your Zallet wallet database (wallet.db in your datadir), and");
+        eprintln!("  - the age encryption identity file (the file named by the");
+        eprintln!("    keystore.encryption_identity config option); wallet.db needs it too.");
+        eprintln!();
+        eprintln!("If you lose the identity file, or forget its passphrase, neither this exported");
+        eprintln!("mnemonic nor the spending keys in wallet.db can be decrypted, and those funds");
+        eprintln!("are unrecoverable. (wallet.db itself is not encrypted: it holds your");
+        eprintln!("transaction history and viewing keys in the clear, so store backups securely.)");
+        eprintln!("There is currently no complete backup RPC or command.");
+
         Ok(())
     }
 }

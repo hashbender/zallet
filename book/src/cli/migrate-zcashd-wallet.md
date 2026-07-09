@@ -7,6 +7,24 @@ wallet (`wallet.db`).
 
 [`zallet init-wallet-encryption`] must be run before this command.
 
+> **⚠️ Back up your wallets**
+>
+> **Keep your original `zcashd` `wallet.dat`.** This migration reports (see below) anything
+> it cannot represent in a Zallet wallet rather than migrating it; that key material exists
+> only in `wallet.dat`, so if you lose it those funds are unrecoverable. Do not delete or
+> discard `wallet.dat` after migrating.
+>
+> **Back up the new Zallet wallet, too.** Its `wallet.db` can hold spending keys that a
+> mnemonic backup does **not** cover — keys imported with `z_importkey`, and other
+> standalone key material — so [`zallet export-mnemonic`] is **not** a complete backup, and
+> there is currently no complete backup RPC or command. Keep a secure copy of **both** the
+> `wallet.db` file *and* the age encryption identity file (the file named by the
+> `keystore.encryption_identity` config option). Those spending keys are encrypted to that
+> identity; if you lose it, or forget its passphrase, they cannot be decrypted and those
+> funds are unrecoverable. Note that `wallet.db` itself is **not** encrypted — it also holds
+> your transaction history and viewing keys in the clear — so keep the backup somewhere
+> secure.
+
 Parsing a `zcashd` wallet file requires the `db_dump` utility built for Berkeley DB
 version 6.2 (the version `zcashd` uses). When Zallet is built with the `zcashd-import`
 feature it compiles and uses a vendored copy of this utility automatically, so you
@@ -67,4 +85,5 @@ supported.
 
 [`zcashd`]: https://github.com/zcash/zcash
 [`zallet init-wallet-encryption`]: init-wallet-encryption.md
+[`zallet export-mnemonic`]: export-mnemonic.md
 [is started]: start.md
