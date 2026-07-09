@@ -96,6 +96,9 @@ zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "9
 zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "9fe5abf78a15940aa84fd895fed75162f21fcb53" }
 zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "9fe5abf78a15940aa84fd895fed75162f21fcb53" }
 
+zebra-chain = { git = "https://github.com/ZcashFoundation/zebra.git", rev = "f8ead3f229c29864364873c5267a8db3d6ced4a5" }
+zebra-state = { git = "https://github.com/ZcashFoundation/zebra.git", rev = "f8ead3f229c29864364873c5267a8db3d6ced4a5" }
+
 # TEMPORARY: explicit checkpoint retention (ensure_retained / retained_checkpoints).
 # The librustzcash rev above requires these shardtree/incrementalmerkletree APIs
 # and carries this same patch in its own workspace, but Cargo only honours
