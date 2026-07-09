@@ -81,7 +81,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     # Generate the Debian copyright file across the UNION of the three shipped
     # binaries' dependency graphs (gen-copyright resolves each workspace's
     # lockfile; the per-binary graphs differ, so no single build can see all).
-    && cargo run --release --locked -p gen-copyright \
+    #
+    # This stagex builder's rustc has ONLY the musl target installed (there is
+    # no separate glibc host triple), so a bare `cargo run` (no --target) still
+    # implicitly resolves to x86_64-unknown-linux-musl, but by a different
+    # cargo codepath than an explicit `--target` invocation: it fails to build
+    # `serde_derive`'s proc-macro crate-type for that target ("cannot produce
+    # proc-macro ... as the target x86_64-unknown-linux-musl does not support
+    # these crate types"), even though the three `cargo install --target
+    # ${TARGET_ARCH}` calls above build serde_derive-dependent crates for the
+    # exact same target successfully. Passing --target explicitly here too
+    # (matching the pattern that already works above) avoids the bare-cargo
+    # codepath and fixes it.
+    && cargo run --release --locked -p gen-copyright --target ${TARGET_ARCH} \
         -- --out /usr/local/share/zallet/debian-copyright
 
 # --- Stage 2: layer for local binary extraction ---
