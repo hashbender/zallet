@@ -533,8 +533,32 @@ impl MigrateZcashdWalletCmd {
             );
         }
 
+        print_backup_reminder();
+
         Ok(())
     }
+}
+
+fn print_backup_reminder() {
+    let bar = "*".repeat(72);
+    println!("\n{bar}");
+    println!("BACK UP YOUR WALLETS (there are two)");
+    println!("{bar}");
+    println!("1. Keep your original zcashd wallet.dat. Anything this migration could not");
+    println!("   import (reported above) exists only there; if you lose wallet.dat, those");
+    println!("   funds are unrecoverable. Keeping a secure backup of it is encouraged.");
+    println!();
+    println!("2. Back up your new Zallet wallet too. wallet.db can hold spending keys that a");
+    println!("   mnemonic backup does NOT cover (keys imported with z_importkey, and other");
+    println!("   standalone key material), so `zallet export-mnemonic` is not a complete");
+    println!("   backup of it. There is currently no complete backup RPC or command: keep a");
+    println!("   secure copy of BOTH the wallet.db file AND the age encryption identity file");
+    println!("   (named by the keystore.encryption_identity config option). Those spending");
+    println!("   keys are encrypted to that identity; if you lose it, or forget its");
+    println!("   passphrase, they cannot be decrypted and those funds are unrecoverable.");
+    println!("   Note that wallet.db itself is NOT encrypted (it also holds your transaction");
+    println!("   history and viewing keys in the clear), so store the backup securely.");
+    println!("{bar}\n");
 }
 
 /// Converts a chain-backend `ChainState` into its ZeWIF representation, preserving
