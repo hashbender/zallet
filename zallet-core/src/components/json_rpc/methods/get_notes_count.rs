@@ -30,6 +30,12 @@ pub(crate) struct GetNotesCount {
 
     /// The number of Orchard notes in the wallet.
     orchard: u32,
+
+    /// The number of Ironwood notes in the wallet.
+    ///
+    /// Ironwood (NU6.3, ZIP 2005) notes are Orchard-shaped but tracked as a
+    /// distinct pool.
+    ironwood: u32,
 }
 
 pub(super) const PARAM_MINCONF_DESC: &str =
@@ -55,6 +61,7 @@ pub(crate) fn call(
 
     let mut sapling = 0;
     let mut orchard = 0;
+    let mut ironwood = 0;
     for account_id in wallet
         .get_account_ids()
         .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?
@@ -69,11 +76,15 @@ pub(crate) fn call(
         if let Some(note_count) = account_metadata.note_count(ShieldedPool::Orchard) {
             orchard += note_count as u32;
         }
+        if let Some(note_count) = account_metadata.note_count(ShieldedPool::Ironwood) {
+            ironwood += note_count as u32;
+        }
     }
 
     Ok(GetNotesCount {
         sprout: 0,
         sapling,
         orchard,
+        ironwood,
     })
 }

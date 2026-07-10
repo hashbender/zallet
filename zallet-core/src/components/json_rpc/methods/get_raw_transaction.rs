@@ -174,6 +174,13 @@ pub(crate) struct TransactionDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     orchard: Option<Orchard>,
 
+    /// JSON object with Ironwood-specific information.
+    ///
+    /// Ironwood (NU6.3, ZIP 2005) actions are Orchard-shaped, so this has the
+    /// same shape as the `orchard` field. Omitted if `version < 6`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ironwood: Option<Orchard>,
+
     /// The `joinSplitSig` public validating key.
     ///
     /// Encoded as a byte-reversed hex string for legacy reasons.
@@ -633,6 +640,13 @@ pub(super) fn tx_to_json(
         .has_orchard()
         .then(|| Orchard::encode(tx.orchard_bundle()));
 
+    // Ironwood actions are Orchard-shaped, so they serialize with the same
+    // encoder as the Orchard bundle, under a distinct `ironwood` key.
+    let ironwood = tx
+        .version()
+        .has_ironwood()
+        .then(|| Orchard::encode(tx.ironwood_bundle()));
+
     TransactionDetails {
         txid: tx.txid().to_string(),
         authdigest: ReverseHex::encode(&tx.auth_commitment().as_bytes().try_into().unwrap()),
@@ -652,6 +666,7 @@ pub(super) fn tx_to_json(
         v_shielded_output,
         binding_sig,
         orchard,
+        ironwood,
         #[cfg(zallet_unimplemented)]
         join_split_pub_key,
         #[cfg(zallet_unimplemented)]

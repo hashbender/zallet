@@ -22,6 +22,20 @@ be considered breaking changes.
   against the `ironwood_received_notes` table. Previously the method elided
   Ironwood actions entirely (they were reported for neither spends, outputs, nor
   sent-to addresses).
+- `z_getnotescount` now reports Ironwood notes under a new `ironwood` field,
+  alongside `sapling` and `orchard`. Previously Ironwood notes were counted in no
+  field at all. (This required advancing the librustzcash pin, whose
+  `WalletRead::get_account_metadata` gained Ironwood note-count support.)
+- `getrawtransaction` and `decoderawtransaction` now surface the Ironwood bundle
+  of a v6 transaction under a new `ironwood` key. Ironwood actions are
+  Orchard-shaped, so the object has the same shape as the existing `orchard` one.
+  Previously the Ironwood bundle was omitted from the decoded output.
+
+### Changed
+
+- Advanced the librustzcash pin (to `29c7fb2`) and, in lockstep, moved the
+  `shardtree` dependency to the published `0.7` release, dropping the temporary
+  `shardtree`/`incrementalmerkletree` git `[patch.crates-io]` (now unnecessary).
 
 ### Fixed
 
