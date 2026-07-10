@@ -68,7 +68,10 @@ resolved() {
 
 fail=0
 
-mapfile -t lockstep_crates < <(patch_crates "${MANIFESTS[@]}")
+# The zebra-* and zaino-* trees are the divergence the split exists to allow
+# (see the header above): a backend pinning its own chain-source crates via
+# [patch.crates-io] must not drag the other backend into lockstep with it.
+mapfile -t lockstep_crates < <(patch_crates "${MANIFESTS[@]}" | grep -Ev '^(zebra|zaino)-')
 lockstep_crates+=("${EXTRA_CRATES[@]}")
 
 for crate in "${lockstep_crates[@]}"; do
