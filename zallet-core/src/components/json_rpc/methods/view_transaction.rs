@@ -34,7 +34,14 @@ use crate::components::{
 };
 
 #[cfg(zallet_build = "wallet")]
-use crate::components::json_rpc::utils::{JsonZecBalance, value_from_zat_balance};
+use {
+    crate::components::{
+        json_rpc::utils::{JsonZecBalance, value_from_zat_balance},
+        keystore::KeyStore,
+    },
+    secrecy::ExposeSecret,
+    zcash_spec::PrfExpand,
+};
 
 const POOL_TRANSPARENT: &str = "transparent";
 const POOL_SAPLING: &str = "sapling";
@@ -274,7 +281,41 @@ struct AccountEffect {
 
 pub(super) const PARAM_TXID_DESC: &str = "The ID of the transaction to view.";
 
-pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &str) -> Response {
+/// The BLAKE2b personalization used by `zcashd`'s very-legacy transparent shielding OVK
+/// derivation.
+#[cfg(zallet_build = "wallet")]
+const ZCASH_TADDR_OVK_PERSONALIZATION: &[u8; 16] = b"ZcTaddrToSapling";
+
+/// Derives the Sapling outgoing viewing key that `zcashd` used when shielding funds from a
+/// transparent address, so that transparent→shielded spends made by such wallets can be
+/// detected.
+///
+/// Ported from `ovkForShieldingFromTaddr` in zcashd's `src/zcash/address/zip32.cpp`.
+#[cfg(zallet_build = "wallet")]
+fn ovk_for_shielding_from_taddr(raw_seed: &[u8]) -> [u8; 32] {
+    // I = BLAKE2b-512("ZcTaddrToSapling", raw_seed)
+    let intermediate = blake2b_simd::Params::new()
+        .hash_length(64)
+        .personal(ZCASH_TADDR_OVK_PERSONALIZATION)
+        .hash(raw_seed);
+
+    // I_L = I[0..32]
+    let mut i_l = [0u8; 32];
+    i_l.copy_from_slice(&intermediate.as_bytes()[..32]);
+
+    // ovk = truncate_32(PRF^expand(I_L, [0x02])); `PrfExpand::SAPLING_OVK` is the [0x02]
+    // domain (see `sapling::keys::ExpandedSpendingKey::from_spending_key`).
+    let mut ovk = [0u8; 32];
+    ovk.copy_from_slice(&PrfExpand::SAPLING_OVK.with(&i_l)[..32]);
+    ovk
+}
+
+pub(crate) async fn call<C: Chain>(
+    wallet: &DbConnection,
+    #[cfg(zallet_build = "wallet")] keystore: &KeyStore,
+    chain: C,
+    txid_str: &str,
+) -> Response {
     let txid = parse_txid(txid_str)?;
 
     let chain_view = chain
@@ -334,6 +375,44 @@ pub(crate) async fn call<C: Chain>(wallet: &DbConnection, chain: C, txid_str: &s
                     scope,
                 ));
                 ovks.push((*fvk.to_ovk(scope).as_ref(), scope));
+            }
+        }
+    }
+
+    // Very old `zcashd` wallets shielded funds directly from a transparent address to a
+    // Sapling address using an OVK derived from the wallet's HD seed, predating the
+    // ZIP 316 transparent OVK derivation collected above. Re-derive that legacy OVK for
+    // every seed we hold so we can still detect these historical "spend from transparent
+    // to external shielded" outputs. This requires the seed, so it is best-effort: if the
+    // wallet is locked we simply skip it (the modern OVKs above still apply).
+    #[cfg(zallet_build = "wallet")]
+    {
+        // Mnemonic seeds use the BIP 39 seed bytes; legacy non-mnemonic seeds use their
+        // raw imported bytes. Either could have been the active `zcashd` HD seed, so try
+        // both. Decryption fails when the wallet is locked, so skip on error rather than
+        // failing the whole request.
+        for seed_fp in keystore
+            .list_seed_fingerprints()
+            .await
+            .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?
+        {
+            if let Ok(seed) = keystore.decrypt_seed(&seed_fp).await {
+                ovks.push((
+                    ovk_for_shielding_from_taddr(seed.expose_secret()),
+                    zip32::Scope::External,
+                ));
+            }
+        }
+        for seed_fp in keystore
+            .list_legacy_seed_fingerprints()
+            .await
+            .map_err(|e| LegacyCode::Database.with_message(e.to_string()))?
+        {
+            if let Ok(seed) = keystore.decrypt_legacy_seed(&seed_fp).await {
+                ovks.push((
+                    ovk_for_shielding_from_taddr(seed.expose_secret()),
+                    zip32::Scope::External,
+                ));
             }
         }
     }
@@ -1063,4 +1142,37 @@ fn is_expiring_soon_tx(
     next_height: BlockHeight,
 ) -> bool {
     is_expired_tx(tx, next_height + TX_EXPIRING_SOON_THRESHOLD)
+}
+
+#[cfg(all(test, zallet_build = "wallet"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ovk_for_shielding_from_taddr_matches_zcashd() {
+        // Known-answer test. The seed is `[0x00, 0x01, ..., 0x1f]` and the expected OVK
+        // was produced by an independent reference implementation of zcashd's
+        // `ovkForShieldingFromTaddr` (BLAKE2b-512 personalized with "ZcTaddrToSapling"
+        // over the seed, then PRF^expand with tag `0x02`):
+        //
+        //   I   = BLAKE2b-512("ZcTaddrToSapling", seed)
+        //   ovk = BLAKE2b-512("Zcash_ExpandSeed", I[0..32] || 0x02)[0..32]
+        let seed: [u8; 32] = core::array::from_fn(|i| i as u8);
+        let expected: [u8; 32] = [
+            0x92, 0x08, 0x16, 0x7e, 0x68, 0xc9, 0xd7, 0x6d, 0xed, 0x9b, 0x6a, 0x97, 0xb6, 0x9b,
+            0x31, 0x26, 0x4b, 0x90, 0xc4, 0x50, 0x2a, 0x81, 0x73, 0x03, 0xd4, 0x38, 0xad, 0xb1,
+            0x4b, 0x8e, 0x97, 0xc1,
+        ];
+        assert_eq!(ovk_for_shielding_from_taddr(&seed), expected);
+    }
+
+    #[test]
+    fn prf_ovk_step_matches_sapling() {
+        // Anchor the second (PRF^expand) step against `sapling-crypto`'s own OVK
+        // derivation, so that only the "ZcTaddrToSapling" personalization rests on a
+        // literal rather than a maintained, tested implementation.
+        let i_l = [7u8; 32];
+        let expsk = sapling::keys::ExpandedSpendingKey::from_spending_key(&i_l);
+        assert_eq!(&PrfExpand::SAPLING_OVK.with(&i_l)[..32], &expsk.ovk.0[..]);
+    }
 }

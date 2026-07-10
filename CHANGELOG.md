@@ -96,6 +96,10 @@ be considered breaking changes.
   and `addresses` for transparent outputs.
 - `z_viewtransaction`: The `outgoing` field is now omitted on outputs that
   `zcashd` didn't include in its response.
+- `z_viewtransaction` now detects funds shielded straight from a transparent
+  address by very old `zcashd` wallets, by re-deriving the legacy
+  `ovkForShieldingFromTaddr` outgoing viewing key from each of the wallet's HD
+  seeds (requires the wallet to be unlocked).
 - Significant performance improvements to `zallet migrate-zcashd-wallet`.
 - `zallet migrate-zcashd-wallet` now accepts `--no-scan` to skip chain scanning
   during migration.
