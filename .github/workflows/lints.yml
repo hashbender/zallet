@@ -11,7 +11,7 @@ permissions: {}
 jobs:
   clippy:
     name: Clippy (MSRV)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     permissions:
       checks: write
     steps:
@@ -53,7 +53,7 @@ jobs:
 
   clippy-beta:
     name: Clippy (beta)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     permissions:
       checks: write
     continue-on-error: true
@@ -102,7 +102,7 @@ jobs:
 
   doc-links:
     name: Intra-doc links
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -129,7 +129,7 @@ jobs:
 
   fmt:
     name: Rustfmt
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -143,7 +143,7 @@ jobs:
 
   hadolint:
     name: Hadolint (${{ matrix.dockerfile }})
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     strategy:
       fail-fast: false
       matrix:
@@ -161,7 +161,7 @@ jobs:
 
   shellcheck:
     name: Shellcheck
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -178,7 +178,7 @@ jobs:
       - hadolint
       - shellcheck
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - name: Determine whether all required-pass steps succeeded
         run: |
