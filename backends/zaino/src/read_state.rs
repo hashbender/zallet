@@ -1,26 +1,24 @@
-//! Shared construction of a read-only Zebra [`ReadStateService`] over a local zebrad.
+//! Construction of a read-only Zebra [`ReadStateService`] over a local zebrad.
 //!
-//! Both the `zebra-state` backend and the (optional) read-state-service variant of the
-//! `zaino` backend read finalized chain state directly from a co-located zebrad's state
-//! database (opened read-only as a RocksDB secondary) and follow the non-finalized tip
-//! over zebrad's gRPC indexer interface. This crate is the single place that wiring
-//! lives; it is compiled into each backend's own dependency graph.
-
-#![forbid(unsafe_code)]
-#![deny(rustdoc::broken_intra_doc_links)]
-#![warn(
-    missing_docs,
-    rust_2018_idioms,
-    unused_lifetimes,
-    unused_qualifications
-)]
+//! The backend reads finalized chain state directly from a co-located zebrad's state
+//! database (opened read-only as a RocksDB secondary) and follows the non-finalized
+//! tip over zebrad's gRPC indexer interface.
+//!
+//! Each backend carries its own copy of this module rather than sharing a crate: a
+//! shared crate's single manifest would bind both backend graphs to one zebra-state
+//! semver range (`[patch.crates-io]` cannot apply across a semver boundary, and
+//! librocksdb-sys's `links = "rocksdb"` forbids two zebra-state versions in one
+//! graph), recreating the coupling the split-workspace design (see
+//! <https://github.com/zcash/zallet/issues/540>) exists to remove. The copies may
+//! diverge as the backends' zebra-* versions do; when touching this file, check
+//! whether the sibling backend's copy needs the same change.
 
 use std::fmt;
 use std::path::PathBuf;
 
+use jsonrpsee::tracing::info;
 use tokio::net::lookup_host;
 use tokio::task::JoinHandle;
-use tracing::info;
 use zcash_protocol::consensus::{NetworkType, NetworkUpgrade, Parameters};
 use zebra_rpc::sync::init_read_state_with_syncer;
 use zebra_state::{ChainTipChange, ReadStateService};
@@ -39,8 +37,6 @@ pub enum ReadStateError {
         /// returning no addresses).
         source: Option<std::io::Error>,
     },
-    /// The requested network has no zebra equivalent.
-    UnsupportedNetwork(&'static str),
     /// The version of the on-disk zebra-state database could not be read.
     DatabaseVersion {
         /// The configured state cache directory.
@@ -72,7 +68,6 @@ impl fmt::Display for ReadStateError {
                     "indexer.read_state_service.grpc_address '{address}' resolved to no IP addresses",
                 ),
             },
-            ReadStateError::UnsupportedNetwork(msg) => write!(f, "{msg}"),
             ReadStateError::DatabaseVersion { path, source } => write!(
                 f,
                 "failed to read the zebra-state database version at '{}': {source}",
@@ -96,8 +91,7 @@ impl std::error::Error for ReadStateError {
         match self {
             ReadStateError::ResolveGrpcAddress { source, .. } => source
                 .as_ref()
-                .map(|e| e as &(dyn std::error::Error + 'static)),
-            ReadStateError::UnsupportedNetwork(_) => None,
+                .map(|e| -> &(dyn std::error::Error + 'static) { e }),
             ReadStateError::DatabaseVersion { source, .. } | ReadStateError::Init(source) => {
                 Some(source.as_ref())
             }
@@ -137,7 +131,6 @@ pub fn network_to_zebra<P: Parameters>(
                 nu6_2: height(NetworkUpgrade::Nu6_2),
                 nu6_3: height(NetworkUpgrade::Nu6_3),
                 nu7: None,
-                ..Default::default()
             };
             Ok(ZebraNetwork::new_regtest(heights.into()))
         }
@@ -203,7 +196,7 @@ pub async fn init_read_state_service(
     match zebra_state::state_database_format_version_on_disk(&zebra_config, zebra_network).map_err(
         |e| ReadStateError::DatabaseVersion {
             path: zebra_config.cache_dir.clone(),
-            source: e.into(),
+            source: e,
         },
     )? {
         Some(_) => {}

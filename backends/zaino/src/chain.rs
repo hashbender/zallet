@@ -9,8 +9,12 @@ use jsonrpsee::tracing::{error, info, warn};
 use tokio::net::lookup_host;
 #[cfg(not(feature = "spend-index"))]
 use transparent::address::TransparentAddress;
+#[cfg(feature = "spend-index")]
+use transparent::bundle::OutPoint;
 use zaino_common::{CacheConfig, DatabaseConfig, StorageConfig};
 use zaino_fetch::jsonrpsee::connector::JsonRpSeeConnector;
+#[cfg(feature = "spend-index")]
+use zaino_state::chain_index::types::{ChainScope, Outpoint};
 use zaino_state::{
     ChainIndex as _, ChainIndexConfig, ChainIndexSnapshot, NodeBackedChainIndex,
     NodeBackedChainIndexSubscriber, StatusType,
@@ -46,11 +50,13 @@ use zallet_core::{
     network::Network,
 };
 
+use crate::read_state::{AbortOnDrop, init_read_state_service, network_to_zebra};
+#[cfg(feature = "spend-index")]
+use zallet_core::components::chain::SpendStatus;
 use zallet_core::components::chain::{
     BlockLocator, Chain, ChainBlock, ChainError, ChainFactory, ChainTx, ChainView, ReportedUpgrade,
     UpgradeStatus,
 };
-use zallet_zebra_read_state::{AbortOnDrop, init_read_state_service, network_to_zebra};
 
 /// Classifies a block-fetch error, distinguishing transient reorg-window failures from
 /// genuine backend errors.
@@ -698,6 +704,30 @@ impl ChainView for ZainoChainView {
             (Some(BestChainLocation::Mempool(_)), _) => TransactionStatus::NotInMainChain,
             (None, orphans) if orphans.is_empty() => TransactionStatus::TxidNotRecognized,
             (None, _) => TransactionStatus::NotInMainChain,
+        })
+    }
+
+    #[cfg(feature = "spend-index")]
+    async fn outpoint_spend_status(&self, outpoint: &OutPoint) -> Result<SpendStatus, ChainError> {
+        let zaino_outpoint = Outpoint::new(*outpoint.hash(), outpoint.n());
+        // Zaino writes its per-outpoint spend index atomically with block ingestion, so
+        // `None` from a spent-index-capable finalised state authoritatively means the
+        // output is unspent on this view's chain; there is no lazily-built-index window
+        // (ZcashFoundation/zebra#10806) requiring `SpentSpenderUnknown`. A finalised
+        // state without the spent index (e.g. the ephemeral passthrough this backend
+        // runs by default) reports an error instead, so the caller retries rather than
+        // concluding the output is unspent.
+        let spender = self
+            .chain
+            .get_outpoint_spenders(&self.snapshot, vec![zaino_outpoint], ChainScope::FullChain)
+            .await
+            .map_err(ChainError::backend)?
+            .into_iter()
+            .next()
+            .flatten();
+        Ok(match spender {
+            Some(txid) => SpendStatus::SpentBy(TxId::from_bytes(txid.0)),
+            None => SpendStatus::Unspent,
         })
     }
 
