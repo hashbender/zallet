@@ -107,10 +107,12 @@ execs the matching per-backend binary (`zallet-zebra`, `zallet-zaino`).
 Because each backend binary statically links `zallet-core`, a change there
 affects both backends. All three binaries open the **same** wallet database, so
 the librustzcash stack (`zcash_client_backend`, `zcash_client_sqlite`, ...) MUST
-resolve to one identical git rev across all three lockfiles. This is enforced in
-CI by `utils/check-lockstep.sh`; move the pin ONLY with
-`utils/sync-librustzcash.sh <rev>`, which edits all three manifests and
-reconciles their lockfiles together (never hand-edit a single manifest's pin).
+resolve to one identical version across all three lockfiles. This is enforced in
+CI by `utils/check-lockstep.sh`. These crates are consumed as released
+crates.io versions, so when you bump one, apply the identical version
+requirement to all three manifests (root `Cargo.toml` plus
+`backends/{zebra,zaino}/Cargo.toml`), then run `utils/sync-lockfiles.sh` to
+reconcile the three lockfiles together (never hand-edit a single lockfile).
 
 Key external dependencies from the Zcash ecosystem:
 - `zcash_client_backend`, `zcash_client_sqlite` -- wallet backend logic and storage
