@@ -13,8 +13,8 @@ use crate::{
 
 impl AsyncRunnable for ExampleConfigCmd {
     async fn run(&self) -> Result<(), Error> {
-        if !self.this_is_alpha_code_and_you_will_need_to_recreate_the_example_later {
-            return Err(ErrorKind::Generic.context(fl!("example-alpha-code")).into());
+        if !self.this_is_beta_code_and_you_will_need_to_recreate_the_example_later {
+            return Err(ErrorKind::Generic.context(fl!("example-beta-code")).into());
         }
 
         // Serialize the example config.

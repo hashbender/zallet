@@ -9,10 +9,10 @@
 #
 # Everything that touches persisted wallet state must NOT diverge: all three
 # binaries open the same wallet database, so a drifted zcash_client_sqlite (or
-# rusqlite, or any crate in the librustzcash patch block) could apply different
-# schema migrations depending on which binary ran first. This script fails CI
-# when any such crate resolves to a different version/source in one lockfile,
-# and when the shipped package versions drift out of release lockstep.
+# rusqlite, or any other wallet-critical crate) could apply different schema
+# migrations depending on which binary ran first. This script fails CI when any
+# such crate resolves to a different set of versions/sources in one lockfile, and
+# when the shipped package versions drift out of release lockstep.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -27,9 +27,37 @@ PACKAGES=(
   backends/zaino/Cargo.toml
 )
 
-# The lockstep set: the union of [patch.crates-io] package names across the
-# three workspace manifests (honouring `package = "..."` renames), plus crates
-# that touch the shared wallet database but are not patched.
+# The wallet-critical librustzcash stack: zcash_client_sqlite (which owns the
+# database schema and migrations) plus the crates whose types it persists. These
+# are consumed as released crates.io versions rather than a shared [patch] git
+# rev, so their names can no longer be scraped from the patch block -- they are
+# listed explicitly here. Package names are as they appear in Cargo.lock (i.e.
+# the published crate name, not any local `package = "..."` alias).
+WALLET_CRATES=(
+  equihash
+  f4jumble
+  orchard
+  sapling-crypto
+  zcash_address
+  zcash_client_backend
+  zcash_client_sqlite
+  zcash_encoding
+  zcash_history
+  zcash_keys
+  zcash_note_encryption
+  zcash_primitives
+  zcash_proofs
+  zcash_protocol
+  zcash_script
+  zcash_spec
+  zcash_transparent
+  zip321
+)
+
+# Additional lockstep set: the union of [patch.crates-io] package names across
+# the three workspace manifests (honouring `package = "..."` renames) so that a
+# shared patched crate such as `age` stays consistent, plus wallet-database
+# crates that are neither patched nor part of the librustzcash stack.
 EXTRA_CRATES=(rusqlite)
 
 patch_crates() {
@@ -48,21 +76,29 @@ patch_crates() {
   ' "$@" | sort -u
 }
 
-# Prints "version source" (source may be empty) for a crate in a lockfile, or
-# nothing if the crate is absent from that graph.
+# Prints the full, sorted set of "version source" lines a crate resolves to in a
+# lockfile (one per line; source may be empty), or nothing if the crate is absent
+# from that graph. Released crates permit more than one major version in a single
+# graph, so a crate can legitimately have several entries -- the whole set must
+# match across lockfiles, not just an arbitrary first entry.
 resolved() {
   local crate="$1" lockfile="$2"
   awk -v crate="$crate" '
     # Only [[package]] stanzas count: [[patch.unused]] stanzas also carry
-    # name/version lines but describe patches absent from the graph.
-    /^\[\[package\]\]/ { inpkg = 1; name = ""; version = ""; source = ""; next }
-    /^\[\[/ { inpkg = 0 }
+    # name/version lines but describe patches absent from the graph. A stanza
+    # ends at a blank line or the next [[...]] header.
+    function flush() {
+      if (inpkg && name == crate) print version, source
+      inpkg = 0; name = ""; version = ""; source = ""
+    }
+    /^\[\[package\]\]/ { flush(); inpkg = 1; next }
+    /^\[\[/ { flush(); next }
+    /^$/ { flush(); next }
     inpkg && $1 == "name" { gsub(/"/, "", $3); name = $3 }
     inpkg && $1 == "version" { gsub(/"/, "", $3); version = $3 }
     inpkg && $1 == "source" { gsub(/"/, "", $3); source = $3 }
-    /^$/ && inpkg && name == crate { print version, source; exit }
-    END { if (inpkg && name == crate) print version, source }
-  ' "$lockfile"
+    END { flush() }
+  ' "$lockfile" | sort
 }
 
 fail=0
@@ -71,26 +107,30 @@ fail=0
 # (see the header above): a backend pinning its own chain-source crates via
 # [patch.crates-io] must not drag the other backend into lockstep with it.
 mapfile -t lockstep_crates < <(patch_crates "${MANIFESTS[@]}" | grep -Ev '^(zebra|zaino)-')
-lockstep_crates+=("${EXTRA_CRATES[@]}")
+lockstep_crates+=("${WALLET_CRATES[@]}" "${EXTRA_CRATES[@]}")
+# De-duplicate in case an explicit wallet crate is also patched.
+mapfile -t lockstep_crates < <(printf '%s\n' "${lockstep_crates[@]}" | sort -u)
 
 for crate in "${lockstep_crates[@]}"; do
   declare -A seen=()
   present=0
   for lf in "${LOCKFILES[@]}"; do
-    r="$(resolved "$crate" "$lf")"
+    # The resolved set is multiline; collapse it to a single comparable
+    # signature. An empty signature means the crate is absent from this graph.
+    r="$(resolved "$crate" "$lf" | paste -sd'|' -)"
     if [[ -n "$r" ]]; then
       present=$((present + 1))
       seen["$r"]+="$lf "
     fi
   done
   if [[ "${#seen[@]}" -gt 1 ]]; then
-    echo "LOCKSTEP VIOLATION: $crate resolves differently across lockfiles:" >&2
+    echo "LOCKSTEP VIOLATION: $crate resolves to different versions across lockfiles:" >&2
     for r in "${!seen[@]}"; do
-      echo "  $r  <- ${seen[$r]}" >&2
+      echo "  {${r//|/, }}  <- ${seen[$r]}" >&2
     done
     fail=1
   elif [[ "$present" -eq 0 ]]; then
-    echo "note: patched crate $crate is not present in any lockfile (unused patch?)" >&2
+    echo "note: wallet-critical crate $crate is not present in any lockfile" >&2
   fi
   unset seen
 done
@@ -111,8 +151,8 @@ done
 if [[ "$fail" -ne 0 ]]; then
   echo "" >&2
   echo "Wallet-critical dependencies must resolve identically in all three" >&2
-  echo "lockfiles; re-sync the [patch.crates-io] blocks and run 'cargo update" >&2
-  echo "-p <crate>' in the divergent workspace. See utils/check-lockstep.sh." >&2
+  echo "lockfiles; align the version requirements across the root and backend" >&2
+  echo "manifests, then run utils/sync-lockfiles.sh. See utils/check-lockstep.sh." >&2
   exit 1
 fi
 

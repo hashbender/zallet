@@ -27,7 +27,7 @@ impl StartCmd {
         let config = APP.config();
         let _lock = config.lock_datadir()?;
 
-        // ALPHA: Warn when currently-unused config options are set.
+        // BETA: Warn when currently-unused config options are set.
         let warn_unused =
             |option: &str| warn!("{}", fl!("warn-config-unused", option = option.to_string()));
         // TODO: https://github.com/zcash/zallet/issues/199

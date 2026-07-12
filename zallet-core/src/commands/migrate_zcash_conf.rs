@@ -130,8 +130,8 @@ impl AsyncRunnable for MigrateZcashConfCmd {
             }
         }
 
-        if !self.this_is_alpha_code_and_you_will_need_to_redo_the_migration_later {
-            return Err(ErrorKind::Generic.context(fl!("migrate-alpha-code")).into());
+        if !self.this_is_beta_code_and_you_will_need_to_redo_the_migration_later {
+            return Err(ErrorKind::Generic.context(fl!("migrate-beta-code")).into());
         }
 
         // Serialize the config.

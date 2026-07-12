@@ -51,8 +51,8 @@ impl MigrateZcashdWalletCmd {
     pub(crate) async fn run_with<F: ChainFactory>(&self, factory: &F) -> Result<(), Error> {
         let config = APP.config();
 
-        if !self.this_is_alpha_code_and_you_will_need_to_redo_the_migration_later {
-            return Err(ErrorKind::Generic.context(fl!("migrate-alpha-code")).into());
+        if !self.this_is_beta_code_and_you_will_need_to_redo_the_migration_later {
+            return Err(ErrorKind::Generic.context(fl!("migrate-beta-code")).into());
         }
 
         // Start monitoring the chain (skip if --no-scan).

@@ -9,8 +9,8 @@ the simplest options:
 | Ubuntu | [Debian packages](debian.md) |
 
 > Help from new packagers is very welcome. However, please note that Zallet is currently
-> ALPHA software, and is rapidly changing. If you create a Zallet package before the 1.0.0
-> production release, please ensure you mark it as alpha software and regularly update it.
+> BETA software, and is rapidly changing. If you create a Zallet package before the 1.0.0
+> production release, please ensure you mark it as beta software and regularly update it.
 
 ## Choosing a chain backend
 
@@ -95,8 +95,8 @@ instructions on the [Rust installation page]. Zallet currently requires at least
 version 1.88.
 
 > WARNING: The following does not yet work because Zallet cannot be published to
-> [crates.io] while it has unpublished dependencies. This will be fixed during the alpha
-> phase. In the meantime, follow the instructions to install the latest development
+> [crates.io] while it has unpublished dependencies. This will be fixed before the 1.0.0
+> release. In the meantime, follow the instructions to install the latest development
 > version.
 
 Once you have installed Rust, the following command can be used to build and install

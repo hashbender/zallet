@@ -119,9 +119,9 @@ pub(crate) struct ExampleConfigCmd {
     #[arg(short, long)]
     pub(crate) force: bool,
 
-    /// Temporary flag ensuring any alpha users are aware the config is not stable.
+    /// Temporary flag ensuring any beta users are aware the config is not stable.
     #[arg(long)]
-    pub(crate) this_is_alpha_code_and_you_will_need_to_recreate_the_example_later: bool,
+    pub(crate) this_is_beta_code_and_you_will_need_to_recreate_the_example_later: bool,
 }
 
 /// `migrate-zcash-conf` subcommand
@@ -154,9 +154,9 @@ pub(crate) struct MigrateZcashConfCmd {
     #[arg(short, long)]
     pub(crate) force: bool,
 
-    /// Temporary flag ensuring any alpha users are aware the migration is not stable.
+    /// Temporary flag ensuring any beta users are aware the migration is not stable.
     #[arg(long)]
-    pub(crate) this_is_alpha_code_and_you_will_need_to_redo_the_migration_later: bool,
+    pub(crate) this_is_beta_code_and_you_will_need_to_redo_the_migration_later: bool,
 }
 
 /// `migrate-zcashd-wallet` subcommand
@@ -208,9 +208,9 @@ pub(crate) struct MigrateZcashdWalletCmd {
     #[arg(long)]
     pub(crate) no_scan: bool,
 
-    /// Temporary flag ensuring any alpha users are aware the migration is not stable.
+    /// Temporary flag ensuring any beta users are aware the migration is not stable.
     #[arg(long)]
-    pub(crate) this_is_alpha_code_and_you_will_need_to_redo_the_migration_later: bool,
+    pub(crate) this_is_beta_code_and_you_will_need_to_redo_the_migration_later: bool,
 }
 
 /// `generate-encryption-identity` subcommand
