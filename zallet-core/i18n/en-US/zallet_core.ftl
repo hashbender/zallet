@@ -20,8 +20,8 @@
 -zallet-add-rpc-user = {-zallet} add-rpc-user
 
 -allow-warnings = --allow-warnings
--allow-alpha-example = --this-is-alpha-code-and-you-will-need-to-recreate-the-example-later
--allow-alpha-migration = --this-is-alpha-code-and-you-will-need-to-redo-the-migration-later
+-allow-beta-example = --this-is-beta-code-and-you-will-need-to-recreate-the-example-later
+-allow-beta-migration = --this-is-beta-code-and-you-will-need-to-redo-the-migration-later
 -allow-multiple-wallet-imports = --allow-multiple-wallet-imports
 -datadir = --datadir
 -db_dump = db_dump
@@ -76,10 +76,10 @@ rpc-cookie-user-conflict = Configured user conflicts with cookie auth username, 
 
 ## zallet.toml example messages
 
-example-alpha-code =
+example-beta-code =
     This command is not stable. You will need to rerun this command again once {-zallet}
     is stable to migrate your config correctly. To confirm you are aware of this, use
-    '{-allow-alpha-example}'.
+    '{-allow-beta-example}'.
 
 ## zcash.conf migration messages
 
@@ -111,11 +111,11 @@ migrate-warn-unsupported =
     required for your use case, please get in touch with the {-zcash} developers
     as soon as possible to discuss alternatives.
 
-migrate-alpha-code =
+migrate-beta-code =
     This command is not stable, and parts of your {-zcashd} data may not get
     migrated correctly. You will need to rerun this command again once {-zallet}
     is stable to migrate your config correctly. To confirm you are aware of
-    this, use '{-allow-alpha-migration}'.
+    this, use '{-allow-beta-migration}'.
 
 migrate-config-written = {-zallet} config written to {$conf}
 
@@ -146,7 +146,7 @@ err-init-config-db-mismatch =
     set 'network' back to {$db_network_type}, or use a different data directory to
     create a fresh {$config_network_type} wallet.
 err-init-db-incompatible-alpha =
-    This wallet database was created by an incompatible alpha version of {-zallet}.
+    This wallet database was created by an incompatible earlier version of {-zallet}.
     To use this {-zallet} release, start again with a fresh Zallet wallet or a
     new data directory.
 err-init-db-invalid-zallet-version =

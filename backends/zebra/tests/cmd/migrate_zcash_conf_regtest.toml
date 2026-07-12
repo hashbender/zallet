@@ -1,5 +1,5 @@
 bin.name = "zallet-zebra"
-args = "migrate-zcash-conf --zcashd-datadir ./ -o - --this-is-alpha-code-and-you-will-need-to-redo-the-migration-later"
+args = "migrate-zcash-conf --zcashd-datadir ./ -o - --this-is-beta-code-and-you-will-need-to-redo-the-migration-later"
 stdin = ""
 stdout = """
 # Zallet configuration file
@@ -23,7 +23,7 @@ regtest_nuparams = [
 [external]
 
 [features]
-as_of_version = "0.1.0-alpha.4"
+as_of_version = "0.1.0-beta.1"
 
 [features.deprecated]
 

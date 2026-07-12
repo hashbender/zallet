@@ -59,8 +59,8 @@ Additional CLI arguments:
   extracted from the `wallet.dat` file. This can enable the import of key data
   from wallets that have been used on consensus forks of the Zcash chain.
 
-> For the Zallet alpha releases, the command also currently takes another required flag
-> `--this-is-alpha-code-and-you-will-need-to-redo-the-migration-later`.
+> For the Zallet beta releases, the command also currently takes another required flag
+> `--this-is-beta-code-and-you-will-need-to-redo-the-migration-later`.
 
 When run, Zallet will parse the `zcashd` wallet file, export its contents to an
 in-memory [ZeWIF] (Zcash Wallet Interchange Format) document, connect to the

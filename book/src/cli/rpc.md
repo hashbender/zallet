@@ -40,7 +40,7 @@ below:
 | Hostname, domain, or IP address   | Only IP address                    |
 | `zcash-cli <method> [<param> ..]` | `zallet rpc <method> [<param> ..]` |
 
-For parameter parsing, `zallet rpc` is (as of the alpha releases) both more and less
+For parameter parsing, `zallet rpc` is (as of the beta releases) both more and less
 flexible than `zcash-cli`:
 
 - It is more flexible because `zcash-cli` implements type-checking on method parameters,

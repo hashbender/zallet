@@ -83,7 +83,7 @@ jobs:
           # be prepended: top-level TOML keys precede the first [section] header.
           "$bindir/zallet" --datadir "$datadir" example-config \
             -o "$datadir/zallet.toml" \
-            --this-is-alpha-code-and-you-will-need-to-recreate-the-example-later
+            --this-is-beta-code-and-you-will-need-to-recreate-the-example-later
           sed -i '1i backend = "zaino"' "$datadir/zallet.toml"
 
           # backend = "zaino" maps to the zallet-zaino binary: with the binary
@@ -100,7 +100,7 @@ jobs:
           # Belt-and-braces: a backend binary invoked directly against a config
           # that names the other backend refuses to run.
           if out=$("$bindir/zallet-zebra" --datadir "$datadir" example-config -o - \
-            --this-is-alpha-code-and-you-will-need-to-recreate-the-example-later 2>&1); then
+            --this-is-beta-code-and-you-will-need-to-recreate-the-example-later 2>&1); then
             echo "expected zallet-zebra to reject a backend=zaino config"; exit 1
           fi
           echo "$out" | grep -q "provides the 'zebra' backend" \
