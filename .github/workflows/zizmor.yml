@@ -11,7 +11,7 @@ permissions: {}
 jobs:
   zizmor:
     name: zizmor latest via Cargo
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     permissions:
       security-events: write
     steps:
