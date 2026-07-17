@@ -19,7 +19,7 @@ jobs:
   # are not in the current graph, so a shared config cannot serve all three).
   cargo-vet:
     name: Vet Rust dependencies (${{ matrix.workspace }})
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     strategy:
       matrix:
         workspace: [".", "backends/zebra", "backends/zaino"]
@@ -38,7 +38,7 @@ jobs:
 
   cargo-deny:
     name: Check licenses (${{ matrix.workspace }})
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     strategy:
       matrix:
         workspace: [".", "backends/zebra", "backends/zaino"]
@@ -57,7 +57,7 @@ jobs:
       - cargo-vet
       - cargo-deny
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-medium-4c-8g
     steps:
       - name: Determine whether all required-pass steps succeeded
         run: |
